@@ -22,6 +22,40 @@ fn emit_progress(app: &AppHandle, feed_id: &str, feed_name: &str, step: &str, me
 }
 
 pub async fn sync_feed_internal(app: &AppHandle, feed: &Feed) -> Result<(), AppError> {
+    // Pass 1: fast scan & create episodes
+    scan_feed(app, feed).await?;
+
+    // Pass 2 & 3: download and upload run concurrently via a channel.
+    // As each episode finishes downloading, it's sent to the upload task.
+    let (tx, rx) = tokio::sync::mpsc::channel::<Episode>(8);
+
+    let app_dl = app.clone();
+    let feed_dl = feed.clone();
+    let download_task = tokio::spawn(async move {
+        if let Err(e) = download_feed(&app_dl, &feed_dl, tx).await {
+            log::error!("Download feed {} failed: {e}", feed_dl.name);
+        }
+    });
+
+    let app_ul = app.clone();
+    let feed_ul = feed.clone();
+    let upload_task = tokio::spawn(async move {
+        if let Err(e) = upload_feed(&app_ul, &feed_ul, rx).await {
+            log::error!("Upload feed {} failed: {e}", feed_ul.name);
+        }
+    });
+
+    // Don't block the caller — let both run in background
+    tokio::spawn(async move {
+        let _ = download_task.await;
+        let _ = upload_task.await;
+    });
+
+    Ok(())
+}
+
+/// Pass 1: Fast flat-playlist scan. Creates episodes in DB with basic info.
+async fn scan_feed(app: &AppHandle, feed: &Feed) -> Result<(), AppError> {
     let state = app.state::<AppState>();
 
     emit_progress(app, &feed.id, &feed.name, "fetch", "Fetching playlist...");
@@ -34,86 +68,39 @@ pub async fn sync_feed_internal(app: &AppHandle, feed: &Feed) -> Result<(), AppE
         .await?;
 
     let existing_ids: HashSet<String> = detail.episodes.iter().map(|e| e.video_id.clone()).collect();
-    let entries = extractor::fetch_playlist(app, &feed.source_url, 15).await?;
+    let entries = extractor::fetch_playlist_fast(app, &feed.source_url, 15).await?;
     let new_entries: Vec<&PlaylistEntry> = entries
         .iter()
         .filter(|e| e.id.as_ref().map_or(true, |id| !existing_ids.contains(id)))
         .collect();
 
-    let failed_episodes: Vec<&Episode> = detail
-        .episodes
-        .iter()
-        .filter(|e| e.status == "failed")
-        .collect();
-
-    if new_entries.is_empty() && failed_episodes.is_empty() {
+    if new_entries.is_empty() {
         emit_progress(app, &feed.id, &feed.name, "done", "Already up to date");
         return Ok(());
     }
 
-    let temp_dir = std::env::temp_dir().join(format!("castify-{}", uuid_simple()));
-    tokio::fs::create_dir_all(&temp_dir).await?;
-
-    // Retry failed episodes
-    for ep in &failed_episodes {
-        emit_progress(
-            app,
-            &feed.id,
-            &feed.name,
-            "retry",
-            &format!("Retrying: {}", ep.title),
-        );
-
-        let result = retry_episode(app, &state, ep).await;
-        if let Err(e) = result {
-            log::warn!("Retry failed for {}: {e}", ep.title);
-            let _ = update_episode_status(&state, &ep.id, "failed", None).await;
-        }
-    }
-
-    // Process new entries
     for entry in &new_entries {
         let video_id = match &entry.id {
             Some(id) => id.clone(),
             None => continue,
         };
         let title = entry.title.clone().unwrap_or_else(|| video_id.clone());
-        let pub_date = entry.upload_date.as_ref().and_then(|d| {
-            if d.len() == 8 {
-                Some(format!(
-                    "{}-{}-{}T00:00:00Z",
-                    &d[..4],
-                    &d[4..6],
-                    &d[6..8]
-                ))
-            } else {
-                None
-            }
-        });
-        let duration_sec = entry.duration.map(|d| d as i64);
 
-        emit_progress(
-            app,
-            &feed.id,
-            &feed.name,
-            "create",
-            &format!("Creating: {title}"),
-        );
+        emit_progress(app, &feed.id, &feed.name, "create", &format!("Creating: {title}"));
 
-        // Step 1: Create episode
         let create_body = CreateEpisodeRequest {
             video_id: video_id.clone(),
             title: title.clone(),
-            description: entry.description.clone(),
-            pub_date,
-            duration_sec,
+            description: None,
+            pub_date: None,
+            duration_sec: entry.duration.map(|d| d as i64),
         };
 
-        let resp: CreateEpisodeResponse = match state
+        if let Err(e) = state
             .api
             .read()
             .await
-            .request_with_body(
+            .request_with_body::<CreateEpisodeResponse, _>(
                 &format!("/api/v1/feeds/{}/episodes", feed.id),
                 "POST",
                 Some(&create_body),
@@ -121,127 +108,181 @@ pub async fn sync_feed_internal(app: &AppHandle, feed: &Feed) -> Result<(), AppE
             )
             .await
         {
+            log::warn!("Failed to create episode {title}: {e}");
+        }
+    }
+
+    emit_progress(app, &feed.id, &feed.name, "done", &format!("Found {} new episodes", new_entries.len()));
+    Ok(())
+}
+
+/// Pass 2: For each pending/failed episode, fetch metadata and download audio.
+/// Sends completed episodes to the upload task via the channel.
+async fn download_feed(
+    app: &AppHandle,
+    feed: &Feed,
+    tx: tokio::sync::mpsc::Sender<Episode>,
+) -> Result<(), AppError> {
+    let state = app.state::<AppState>();
+
+    let detail: FeedDetailResponse = state
+        .api
+        .read()
+        .await
+        .request(&format!("/api/v1/feeds/{}", feed.id), "GET", true)
+        .await?;
+
+    let pending_episodes: Vec<Episode> = detail
+        .episodes
+        .into_iter()
+        .filter(|e| e.status == "pending" || e.status == "failed")
+        .collect();
+
+    if pending_episodes.is_empty() {
+        return Ok(());
+    }
+
+    let temp_dir = temp_dir_for_feed(&feed.id);
+    tokio::fs::create_dir_all(&temp_dir).await?;
+
+    for ep in pending_episodes {
+        // Fetch full metadata
+        emit_progress(app, &feed.id, &feed.name, "metadata", &format!("Fetching metadata: {}", ep.title));
+        match extractor::fetch_video_metadata(app, &ep.video_id).await {
+            Ok(meta) => {
+                let pub_date = format_upload_date(meta.upload_date.as_deref());
+                let update_body = UpdateEpisodeMetadataRequest {
+                    description: meta.description.clone(),
+                    pub_date,
+                    duration_sec: meta.duration.map(|d| d as i64),
+                };
+                if let Err(e) = state
+                    .api
+                    .read()
+                    .await
+                    .request_no_content(
+                        &format!("/api/v1/episodes/{}", ep.id),
+                        "PATCH",
+                        Some(&update_body),
+                        true,
+                    )
+                    .await
+                {
+                    log::warn!("Failed to update metadata for {}: {e}", ep.title);
+                }
+            }
+            Err(e) => log::warn!("Failed to fetch metadata for {}: {e}", ep.title),
+        }
+
+        // Download audio
+        emit_progress(app, &feed.id, &feed.name, "download", &format!("Downloading: {}", ep.title));
+        match extractor::extract_audio(app, &ep.video_id, &temp_dir).await {
+            Ok(_) => {
+                let _ = update_episode_status(app, &ep.id, "downloaded", None).await;
+                let _ = tx.send(ep).await;
+            }
+            Err(e) => {
+                log::warn!("Download failed for {}: {e}", ep.title);
+                let _ = update_episode_status(app, &ep.id, "failed", None).await;
+            }
+        }
+    }
+
+    emit_progress(app, &feed.id, &feed.name, "done", "Downloads complete");
+    Ok(())
+}
+
+/// Pass 3: Receives downloaded episodes and uploads them to B2.
+async fn upload_feed(
+    app: &AppHandle,
+    feed: &Feed,
+    mut rx: tokio::sync::mpsc::Receiver<Episode>,
+) -> Result<(), AppError> {
+    let state = app.state::<AppState>();
+    let temp_dir = temp_dir_for_feed(&feed.id);
+
+    while let Some(ep) = rx.recv().await {
+        let audio_path = temp_dir.join(format!("{}.m4a", ep.video_id));
+        if !audio_path.exists() {
+            log::warn!("Audio file missing for {}, marking failed", ep.title);
+            let _ = update_episode_status(app, &ep.id, "failed", None).await;
+            continue;
+        }
+
+        // Get upload URL
+        let url_resp: UploadURLResponse = match state
+            .api
+            .read()
+            .await
+            .request_with_body(
+                &format!("/api/v1/episodes/{}/upload-url", ep.id),
+                "POST",
+                Some(&serde_json::json!({})),
+                true,
+            )
+            .await
+        {
             Ok(r) => r,
             Err(e) => {
-                log::warn!("Failed to create episode {title}: {e}");
+                log::warn!("Failed to get upload URL for {}: {e}", ep.title);
+                let _ = update_episode_status(app, &ep.id, "failed", None).await;
                 continue;
             }
         };
 
-        // Steps 2-4: Download, upload, update
-        if let Err(e) = process_episode(
-            app,
-            &state,
-            &temp_dir,
-            &feed.id,
-            &feed.name,
-            &video_id,
-            &title,
-            &resp.episode.id,
-            &resp.upload_url,
-            &resp.authorization_token,
-            &resp.file_name,
-        )
-        .await
-        {
-            log::warn!("Episode {title} failed: {e}");
-            let _ = update_episode_status(&state, &resp.episode.id, "failed", None).await;
+        // Upload
+        emit_progress(app, &feed.id, &feed.name, "upload", &format!("Uploading: {}", ep.title));
+        match uploader::upload_to_b2(&audio_path, &url_resp.upload_url, &url_resp.authorization_token, &url_resp.file_name).await {
+            Ok(()) => {
+                let file_size = tokio::fs::metadata(&audio_path).await.map(|m| m.len()).unwrap_or(0);
+                let _ = update_episode_status(app, &ep.id, "ready", Some(file_size)).await;
+                let _ = tokio::fs::remove_file(&audio_path).await;
+                emit_progress(app, &feed.id, &feed.name, "complete", &format!("Done: {}", ep.title));
+            }
+            Err(e) => {
+                log::warn!("Upload failed for {}: {e}", ep.title);
+                let _ = update_episode_status(app, &ep.id, "failed", None).await;
+            }
         }
     }
 
-    // Cleanup temp dir
-    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
-    emit_progress(app, &feed.id, &feed.name, "done", "Sync complete");
+    // Clean up temp dir if empty
+    let _ = tokio::fs::remove_dir(&temp_dir).await;
+    emit_progress(app, &feed.id, &feed.name, "done", "Upload complete");
     Ok(())
 }
 
-async fn retry_episode(
-    app: &AppHandle,
-    state: &State<'_, AppState>,
-    ep: &Episode,
-) -> Result<(), AppError> {
-    let temp_dir = std::env::temp_dir().join(format!("castify-retry-{}", uuid_simple()));
-    tokio::fs::create_dir_all(&temp_dir).await?;
-
-    // Get a fresh upload URL
-    let url_resp: UploadURLResponse = state
-        .api
-        .read()
-        .await
-        .request_with_body(
-            &format!("/api/v1/episodes/{}/upload-url", ep.id),
-            "POST",
-            Some(&serde_json::json!({})),
-            true,
-        )
-        .await?;
-
-    let result = process_episode(
-        app,
-        state,
-        &temp_dir,
-        &ep.feed_id,
-        &ep.title,
-        &ep.video_id,
-        &ep.title,
-        &ep.id,
-        &url_resp.upload_url,
-        &url_resp.authorization_token,
-        &url_resp.file_name,
-    )
-    .await;
-
-    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
-    result
+fn temp_dir_for_feed(feed_id: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("castify-{feed_id}"))
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn process_episode(
-    app: &AppHandle,
-    state: &State<'_, AppState>,
-    temp_dir: &std::path::Path,
-    feed_id: &str,
-    feed_name: &str,
-    video_id: &str,
-    title: &str,
-    episode_id: &str,
-    upload_url: &str,
-    auth_token: &str,
-    file_name: &str,
-) -> Result<(), AppError> {
-    // Step 2: Download
-    emit_progress(app, feed_id, feed_name, "download", &format!("Downloading: {title}"));
-    let audio_path = extractor::extract_audio(app, video_id, temp_dir).await?;
-
-    // Step 3: Upload
-    emit_progress(app, feed_id, feed_name, "upload", &format!("Uploading: {title}"));
-    uploader::upload_to_b2(&audio_path, upload_url, auth_token, file_name).await?;
-
-    // Step 4: Update status
-    let file_size = tokio::fs::metadata(&audio_path).await?.len();
-    update_episode_status(state, episode_id, "ready", Some(file_size)).await?;
-
-    emit_progress(
-        app,
-        feed_id,
-        feed_name,
-        "complete",
-        &format!("Done: {title}"),
-    );
-    Ok(())
+fn format_upload_date(upload_date: Option<&str>) -> Option<String> {
+    upload_date.and_then(|d| {
+        if d.len() == 8 {
+            Some(format!(
+                "{}-{}-{}T00:00:00Z",
+                &d[..4],
+                &d[4..6],
+                &d[6..8]
+            ))
+        } else {
+            None
+        }
+    })
 }
 
 async fn update_episode_status(
-    state: &State<'_, AppState>,
+    app: &AppHandle,
     episode_id: &str,
     status: &str,
     file_size: Option<u64>,
 ) -> Result<(), AppError> {
+    let state = app.state::<AppState>();
     let body = UpdateEpisodeRequest {
         status: status.to_string(),
         file_size,
     };
-    state
+    let result = state
         .api
         .read()
         .await
@@ -251,16 +292,8 @@ async fn update_episode_status(
             Some(&body),
             true,
         )
-        .await
-}
-
-fn uuid_simple() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let n = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    format!("{n:x}")
+        .await;
+    result
 }
 
 // -- Tauri commands --

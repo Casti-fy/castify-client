@@ -74,6 +74,16 @@ pub struct UpdateEpisodeRequest {
     pub file_size: Option<u64>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct UpdateEpisodeMetadataRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(rename = "pub_date", skip_serializing_if = "Option::is_none")]
+    pub pub_date: Option<String>,
+    #[serde(rename = "duration_sec", skip_serializing_if = "Option::is_none")]
+    pub duration_sec: Option<i64>,
+}
+
 // -- Response types --
 
 #[derive(Debug, Deserialize, Serialize)]

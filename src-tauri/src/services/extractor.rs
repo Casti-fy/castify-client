@@ -1,11 +1,42 @@
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 
 use tauri::{AppHandle, Manager};
-use tauri_plugin_shell::ShellExt;
-use tauri_plugin_shell::process::CommandEvent;
 
 use crate::error::AppError;
 use crate::models::PlaylistEntry;
+
+/// Resolve the absolute path of a sidecar binary.
+fn resolve_sidecar(app: &AppHandle, name: &str) -> Result<PathBuf, AppError> {
+    // In dev mode, sidecars are next to the built binary in target/debug/
+    // In production, they are in the resource dir
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .ok_or_else(|| AppError::Other("cannot resolve exe dir".into()))?;
+
+    let base_name = Path::new(name).file_name().unwrap_or(name.as_ref());
+    let exe_name = if cfg!(windows) {
+        format!("{}.exe", base_name.to_string_lossy())
+    } else {
+        base_name.to_string_lossy().to_string()
+    };
+
+    // Try exe dir first (where Tauri places sidecars)
+    let candidate = exe_dir.join(&exe_name);
+    if candidate.exists() {
+        return Ok(candidate);
+    }
+
+    // Try resource dir
+    let resource_dir = app.path().resource_dir().unwrap_or_default();
+    let candidate = resource_dir.join(&exe_name);
+    if candidate.exists() {
+        return Ok(candidate);
+    }
+
+    Err(AppError::Other(format!("sidecar not found: {exe_name}")))
+}
 
 /// Run a sidecar binary and collect stdout/stderr, returning (exit_code, stdout, stderr).
 async fn run_sidecar(
@@ -13,42 +44,21 @@ async fn run_sidecar(
     name: &str,
     args: Vec<String>,
 ) -> Result<(i32, String, String), AppError> {
-    let bin_name = Path::new(name).file_name().unwrap_or(name.as_ref()).to_string_lossy();
+    let bin_path = resolve_sidecar(app, name)?;
+    let bin_name = bin_path.file_name().unwrap_or(name.as_ref()).to_string_lossy();
     log::info!("[sidecar] {} {}", bin_name, args.join(" "));
 
-    let cmd = app
-        .shell()
-        .sidecar(name)
-        .map_err(|e| AppError::Other(format!("sidecar {name}: {e}")))?
-        .args(&args);
+    let output = tokio::process::Command::new(&bin_path)
+        .args(&args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+        .map_err(|e| AppError::Other(format!("spawn {bin_name}: {e}")))?;
 
-    let (mut rx, _child) = cmd
-        .spawn()
-        .map_err(|e| AppError::Other(format!("spawn {name}: {e}")))?;
-
-    let mut stdout = String::new();
-    let mut stderr = String::new();
-    let mut exit_code: i32 = -1;
-
-    while let Some(event) = rx.recv().await {
-        match event {
-            CommandEvent::Stdout(line) => {
-                stdout.push_str(&String::from_utf8_lossy(&line));
-                stdout.push('\n');
-            }
-            CommandEvent::Stderr(line) => {
-                stderr.push_str(&String::from_utf8_lossy(&line));
-                stderr.push('\n');
-            }
-            CommandEvent::Terminated(payload) => {
-                exit_code = payload.code.unwrap_or(-1);
-            }
-            CommandEvent::Error(err) => {
-                return Err(AppError::Other(format!("{name} error: {err}")));
-            }
-            _ => {}
-        }
-    }
+    let exit_code = output.status.code().unwrap_or(-1);
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
     if exit_code != 0 {
         log::error!("[sidecar] {} exited with code {}\nstderr: {}", bin_name, exit_code, stderr.trim());
@@ -59,7 +69,8 @@ async fn run_sidecar(
     Ok((exit_code, stdout, stderr))
 }
 
-pub async fn fetch_playlist(
+/// Pass 1: Fast flat-playlist fetch (no per-video requests). Returns basic info only.
+pub async fn fetch_playlist_fast(
     app: &AppHandle,
     url: &str,
     max_items: u32,
@@ -68,6 +79,8 @@ pub async fn fetch_playlist(
         "--ignore-errors".to_string(),
         "--flat-playlist".to_string(),
         "--dump-json".to_string(),
+        "--match-filter".to_string(),
+        "original_url!*=/shorts/".to_string(),
         "--playlist-end".to_string(),
         max_items.to_string(),
         url.to_string(),
@@ -81,13 +94,48 @@ pub async fn fetch_playlist(
         )));
     }
 
-    let entries: Vec<PlaylistEntry> = stdout
+    let entries: Vec<PlaylistEntry> = parse_playlist_lines(&stdout);
+    log::info!("[fetch_playlist_fast] got {} entries", entries.len());
+    Ok(entries)
+}
+
+/// Pass 2: Fetch full metadata for a single video by ID.
+pub async fn fetch_video_metadata(
+    app: &AppHandle,
+    video_id: &str,
+) -> Result<PlaylistEntry, AppError> {
+    let url = format!("https://www.youtube.com/watch?v={video_id}");
+    let args = vec![
+        "--ignore-errors".to_string(),
+        "--dump-json".to_string(),
+        "--skip-download".to_string(),
+        "--no-playlist".to_string(),
+        url,
+    ];
+
+    let (code, stdout, stderr) = run_sidecar(app, "binaries/yt-dlp", args).await?;
+
+    if code != 0 {
+        return Err(AppError::ExtractionFailed(format!(
+            "yt-dlp exit code {code}: {stderr}"
+        )));
+    }
+
+    let line = stdout.lines().find(|l| !l.is_empty()).unwrap_or("");
+    serde_json::from_str(line)
+        .map_err(|e| AppError::Other(format!("parse video metadata: {e}")))
+}
+
+fn parse_playlist_lines(stdout: &str) -> Vec<PlaylistEntry> {
+    stdout
         .lines()
         .filter(|line| !line.is_empty())
-        .filter_map(|line| serde_json::from_str(line).ok())
-        .collect();
-
-    Ok(entries)
+        .filter_map(|line| {
+            serde_json::from_str(line)
+                .map_err(|e| log::warn!("[fetch_playlist] failed to parse line: {e}"))
+                .ok()
+        })
+        .collect()
 }
 
 pub async fn extract_audio(

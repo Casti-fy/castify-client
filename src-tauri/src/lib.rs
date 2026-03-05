@@ -7,7 +7,7 @@ mod state;
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder},
     tray::TrayIconBuilder,
-    Manager,
+    Manager, WindowEvent,
 };
 
 use state::AppState;
@@ -32,6 +32,15 @@ pub fn run() {
                 .menu(&menu)
                 .icon(app.default_window_icon().unwrap().clone())
                 .icon_as_template(true)
+                .on_tray_icon_event(|tray, event| {
+                    if let tauri::tray::TrayIconEvent::Click { .. } = event {
+                        let app = tray.app_handle();
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                })
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "open" => {
                         if let Some(window) = app.get_webview_window("main") {
@@ -63,6 +72,13 @@ pub fn run() {
             commands::settings::get_server_url,
             commands::settings::set_server_url,
         ])
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                // Hide the window instead of closing; app keeps running in tray
+                let _ = window.hide();
+                api.prevent_close();
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running castify");
 }

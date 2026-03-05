@@ -53,11 +53,6 @@ export default function FeedDetail({ feedId, onBack }: Props) {
     }
   };
 
-  const copyCommand = (videoId: string) => {
-    const cmd = `yt-dlp --no-playlist --retries 3 -x --audio-format m4a --audio-quality 0 -o "%(id)s.%(ext)s" "https://www.youtube.com/watch?v=${videoId}"`;
-    navigator.clipboard.writeText(cmd);
-  };
-
   if (!detail) {
     return <div className="center">Loading...</div>;
   }
@@ -108,14 +103,6 @@ export default function FeedDetail({ feedId, onBack }: Props) {
               >
                 {ep.status}
               </span>
-              {ep.status === "failed" && (
-                <button
-                  className="btn small"
-                  onClick={() => copyCommand(ep.video_id)}
-                >
-                  Copy yt-dlp cmd
-                </button>
-              )}
             </div>
           </li>
         ))}

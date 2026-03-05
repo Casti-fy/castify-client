@@ -187,10 +187,3 @@ pub async fn extract_audio(
 
     Ok(audio_path)
 }
-
-pub fn build_extract_command(video_id: &str) -> String {
-    let url = format!("https://www.youtube.com/watch?v={video_id}");
-    format!(
-        "yt-dlp --no-playlist --retries 3 -x --audio-format m4a --audio-quality 0 -o \"%(id)s.%(ext)s\" \"{url}\""
-    )
-}

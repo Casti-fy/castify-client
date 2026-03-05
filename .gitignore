@@ -1,0 +1,15 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/schemas/
+
+# Sidecar binaries (run scripts/build-dependencies.sh to fetch)
+src-tauri/binaries/yt-dlp-*
+src-tauri/binaries/ffmpeg-*
+
+# OS
+.DS_Store
+
+# Env
+.env
+*.log

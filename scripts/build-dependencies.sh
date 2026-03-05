@@ -134,7 +134,7 @@ if [ "$BUILD_YTDLP" = true ]; then
 
         echo "==> Setting up Python venv..."
         $PYTHON -m venv "$BUILD_DIR/venv"
-        if [ "$OS" = "windows" ]; then
+        if [ -f "$BUILD_DIR/venv/Scripts/activate" ]; then
             source "$BUILD_DIR/venv/Scripts/activate"
         else
             source "$BUILD_DIR/venv/bin/activate"

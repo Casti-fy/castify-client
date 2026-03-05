@@ -98,6 +98,17 @@ esac
 
 echo "==> OS=$OS ARCH=$ARCH"
 
+# Detect Python command (Windows uses 'python', Unix uses 'python3')
+if command -v python3 &>/dev/null; then
+    PYTHON="python3"
+elif command -v python &>/dev/null; then
+    PYTHON="python"
+else
+    echo "ERROR: Python not found. Install Python 3.10+."
+    exit 1
+fi
+echo "==> Python: $PYTHON"
+
 # =============================================================================
 # Build yt-dlp from source (YouTube-only)
 # =============================================================================
@@ -122,21 +133,25 @@ if [ "$BUILD_YTDLP" = true ]; then
         YTDLP_SRC="$BUILD_DIR/yt-dlp"
 
         echo "==> Setting up Python venv..."
-        python3 -m venv "$BUILD_DIR/venv"
-        source "$BUILD_DIR/venv/bin/activate"
+        $PYTHON -m venv "$BUILD_DIR/venv"
+        if [ "$OS" = "windows" ]; then
+            source "$BUILD_DIR/venv/Scripts/activate"
+        else
+            source "$BUILD_DIR/venv/bin/activate"
+        fi
 
         echo "==> Installing yt-dlp build dependencies..."
-        python3 "$YTDLP_SRC/devscripts/install_deps.py" -i pyinstaller
+        $PYTHON "$YTDLP_SRC/devscripts/install_deps.py" -i pyinstaller
 
         echo "==> Pruning extractors (keeping: ${YTDLP_KEEP_EXTRACTORS})..."
-        python3 "$SCRIPT_DIR/prune-ytdlp-extractors.py" "$YTDLP_SRC" \
+        $PYTHON "$SCRIPT_DIR/prune-ytdlp-extractors.py" "$YTDLP_SRC" \
             --keep "$YTDLP_KEEP_EXTRACTORS"
 
         echo "==> Generating lazy extractors..."
-        (cd "$YTDLP_SRC" && python3 devscripts/make_lazy_extractors.py)
+        (cd "$YTDLP_SRC" && $PYTHON devscripts/make_lazy_extractors.py)
 
         echo "==> Building with PyInstaller..."
-        (cd "$YTDLP_SRC" && python3 -m bundle.pyinstaller)
+        (cd "$YTDLP_SRC" && $PYTHON -m bundle.pyinstaller)
 
         # Find the built binary (PyInstaller names vary by platform/arch)
         YTDLP_BIN="$(find "$YTDLP_SRC/dist" -maxdepth 1 -type f -name 'yt-dlp*' | head -1)"

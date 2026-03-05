@@ -79,6 +79,8 @@ jobs:
             diffutils
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-nasm
+            mingw-w64-ucrt-x86_64-python
+            mingw-w64-ucrt-x86_64-python-pip
 
       - name: Install Python
         uses: actions/setup-python@v5

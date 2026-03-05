@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# Download yt-dlp and build minimal ffmpeg for Tauri sidecar bundling.
+# Build yt-dlp (YouTube-only) and minimal ffmpeg for Tauri sidecar bundling.
+#
+# yt-dlp is built from source with all extractors except YouTube removed,
+# reducing the binary from ~33 MB to ~5-8 MB.
 #
 # Tauri sidecars require target-triple suffixed binaries:
 #   yt-dlp-aarch64-apple-darwin
@@ -13,6 +16,10 @@
 #   ./scripts/build-dependencies.sh --target <triple> # Specific target
 #   ./scripts/build-dependencies.sh --yt-dlp-only   # Skip ffmpeg
 #   ./scripts/build-dependencies.sh --ffmpeg-only    # Skip yt-dlp
+#
+# Requirements:
+#   - Python 3.10+ with pip/venv
+#   - For ffmpeg: C compiler, make
 
 set -euo pipefail
 
@@ -25,16 +32,20 @@ YTDLP_VERSION="2025.03.31"
 FFMPEG_VERSION="7.1"
 MACOS_MIN="12.0"
 
+# Extractors to keep (add more here to support additional sites)
+# YTDLP_KEEP_EXTRACTORS="youtube,spotify,soundcloud"
+YTDLP_KEEP_EXTRACTORS="youtube"
+
 # Parse arguments
 FORCE=false
 TARGET_TRIPLE=""
 BUILD_FFMPEG=true
-DOWNLOAD_YTDLP=true
+BUILD_YTDLP=true
 
 for arg in "$@"; do
     case "$arg" in
         --force) FORCE=true ;;
-        --ffmpeg-only) DOWNLOAD_YTDLP=false ;;
+        --ffmpeg-only) BUILD_YTDLP=false ;;
         --yt-dlp-only) BUILD_FFMPEG=false ;;
         --target)
             # Next arg will be the target
@@ -88,37 +99,60 @@ esac
 echo "==> OS=$OS ARCH=$ARCH"
 
 # =============================================================================
-# Download yt-dlp
+# Build yt-dlp from source (YouTube-only)
 # =============================================================================
-if [ "$DOWNLOAD_YTDLP" = true ]; then
+if [ "$BUILD_YTDLP" = true ]; then
     YTDLP_OUT="$BINARIES_DIR/yt-dlp-${TARGET_TRIPLE}"
     [ "$OS" = "windows" ] && YTDLP_OUT="${YTDLP_OUT}.exe"
 
     if [ "$FORCE" = false ] && [ -f "$YTDLP_OUT" ]; then
-        echo "yt-dlp already exists at $YTDLP_OUT. Use --force to re-download."
+        echo "yt-dlp already exists at $YTDLP_OUT. Use --force to rebuild."
     else
         echo ""
-        echo "==> Downloading yt-dlp ${YTDLP_VERSION} for ${OS}/${ARCH}..."
+        echo "==> Building yt-dlp ${YTDLP_VERSION} (extractors: ${YTDLP_KEEP_EXTRACTORS}) for ${OS}/${ARCH}..."
 
-        case "$OS" in
-            macos)
-                # macOS universal binary
-                YTDLP_URL="https://github.com/yt-dlp/yt-dlp/releases/download/${YTDLP_VERSION}/yt-dlp_macos"
-                ;;
-            linux)
-                if [ "$ARCH" = "aarch64" ]; then
-                    YTDLP_URL="https://github.com/yt-dlp/yt-dlp/releases/download/${YTDLP_VERSION}/yt-dlp_linux_aarch64"
-                else
-                    YTDLP_URL="https://github.com/yt-dlp/yt-dlp/releases/download/${YTDLP_VERSION}/yt-dlp_linux"
-                fi
-                ;;
-            windows)
-                YTDLP_URL="https://github.com/yt-dlp/yt-dlp/releases/download/${YTDLP_VERSION}/yt-dlp.exe"
-                ;;
-        esac
+        BUILD_DIR="$(mktemp -d)"
+        # Clean up build dir on exit (but don't clobber ffmpeg's trap)
+        YTDLP_BUILD_DIR="$BUILD_DIR"
 
-        curl -L --fail --progress-bar -o "$YTDLP_OUT" "$YTDLP_URL"
+        echo "==> Cloning yt-dlp ${YTDLP_VERSION}..."
+        git clone --depth 1 --branch "${YTDLP_VERSION}" \
+            https://github.com/yt-dlp/yt-dlp.git "$BUILD_DIR/yt-dlp"
+
+        YTDLP_SRC="$BUILD_DIR/yt-dlp"
+
+        echo "==> Setting up Python venv..."
+        python3 -m venv "$BUILD_DIR/venv"
+        source "$BUILD_DIR/venv/bin/activate"
+
+        echo "==> Installing yt-dlp build dependencies..."
+        python3 "$YTDLP_SRC/devscripts/install_deps.py" -i pyinstaller
+
+        echo "==> Pruning extractors (keeping: ${YTDLP_KEEP_EXTRACTORS})..."
+        python3 "$SCRIPT_DIR/prune-ytdlp-extractors.py" "$YTDLP_SRC" \
+            --keep "$YTDLP_KEEP_EXTRACTORS"
+
+        echo "==> Generating lazy extractors..."
+        (cd "$YTDLP_SRC" && python3 devscripts/make_lazy_extractors.py)
+
+        echo "==> Building with PyInstaller..."
+        (cd "$YTDLP_SRC" && python3 -m bundle.pyinstaller)
+
+        # Find the built binary (PyInstaller names vary by platform/arch)
+        YTDLP_BIN="$(find "$YTDLP_SRC/dist" -maxdepth 1 -type f -name 'yt-dlp*' | head -1)"
+        if [ -z "$YTDLP_BIN" ]; then
+            echo "ERROR: No yt-dlp binary found in $YTDLP_SRC/dist/"
+            ls -la "$YTDLP_SRC/dist/" 2>/dev/null || echo "(dist/ not found)"
+            exit 1
+        fi
+        echo "    Built: $(basename "$YTDLP_BIN")"
+
+        cp "$YTDLP_BIN" "$YTDLP_OUT"
         chmod +x "$YTDLP_OUT"
+
+        deactivate 2>/dev/null || true
+        rm -rf "$YTDLP_BUILD_DIR"
+
         echo "    yt-dlp: $(du -h "$YTDLP_OUT" | cut -f1) -> $(basename "$YTDLP_OUT")"
     fi
 fi

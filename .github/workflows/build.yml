@@ -79,10 +79,15 @@ jobs:
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-nasm
 
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Install npm dependencies
         run: npm ci
 
-      # Build sidecar binaries (minimal ffmpeg from source + yt-dlp download)
+      # Build sidecar binaries (YouTube-only yt-dlp from source + minimal ffmpeg)
       - name: Build sidecar binaries (Unix)
         if: matrix.platform != 'windows-latest'
         shell: bash

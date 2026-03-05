@@ -13,6 +13,9 @@ async fn run_sidecar(
     name: &str,
     args: Vec<String>,
 ) -> Result<(i32, String, String), AppError> {
+    let bin_name = Path::new(name).file_name().unwrap_or(name.as_ref()).to_string_lossy();
+    log::info!("[sidecar] {} {}", bin_name, args.join(" "));
+
     let cmd = app
         .shell()
         .sidecar(name)
@@ -45,6 +48,12 @@ async fn run_sidecar(
             }
             _ => {}
         }
+    }
+
+    if exit_code != 0 {
+        log::error!("[sidecar] {} exited with code {}\nstderr: {}", bin_name, exit_code, stderr.trim());
+    } else {
+        log::info!("[sidecar] {} exited with code 0\nstdout: {}\nstderr: {}", bin_name, stdout.trim(), stderr.trim());
     }
 
     Ok((exit_code, stdout, stderr))

@@ -52,9 +52,3 @@ export const createCheckout = (plan: string) =>
   invoke<string>("create_checkout", { plan });
 
 export const createPortal = () => invoke<string>("create_portal");
-
-// Settings
-export const getServerUrl = () => invoke<string>("get_server_url");
-
-export const setServerUrl = (url: string) =>
-  invoke<void>("set_server_url", { url });

@@ -16,6 +16,8 @@ pub struct Feed {
     pub description: Option<String>,
     #[serde(rename = "feed_slug")]
     pub feed_slug: String,
+    #[serde(rename = "feed_url", default)]
+    pub feed_url: String,
     #[serde(rename = "episode_count", default)]
     pub episode_count: i64,
 }

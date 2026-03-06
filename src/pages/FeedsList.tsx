@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import type { Feed, User } from "../lib/types";
 import { getPlanLimits } from "../lib/types";
+import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import * as api from "../lib/api";
 
 interface Props {
@@ -10,16 +11,11 @@ interface Props {
   syncStatus: string;
 }
 
-const SERVER_URL = "http://es.alpharesearch.io:3000";
-
-function feedUrl(slug: string) {
-  return `${SERVER_URL}/rss/${slug}.xml`;
-}
-
 export default function FeedsList({ user, onSelectFeed, onAccount, syncStatus }: Props) {
   const [feeds, setFeeds] = useState<Feed[]>([]);
   const [showAdd, setShowAdd] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const { copiedId, copy } = useCopyToClipboard();
 
   const limits = getPlanLimits(user.plan);
   const atFeedLimit = limits.max_feeds >= 0 && feeds.length >= limits.max_feeds;
@@ -40,10 +36,6 @@ export default function FeedsList({ user, onSelectFeed, onAccount, syncStatus }:
     } catch (err) {
       setDeleteError(String(err));
     }
-  };
-
-  const copyUrl = (slug: string) => {
-    navigator.clipboard.writeText(feedUrl(slug));
   };
 
   return (
@@ -95,10 +87,10 @@ export default function FeedsList({ user, onSelectFeed, onAccount, syncStatus }:
             </div>
             <div className="feed-actions">
               <button
-                className="btn small"
-                onClick={() => copyUrl(feed.feed_slug)}
+                className={`btn small${copiedId === feed.id ? " btn-copied" : ""}`}
+                onClick={() => copy(feed.feed_url, feed.id)}
               >
-                Copy RSS
+                {copiedId === feed.id ? "Copied!" : "Copy RSS"}
               </button>
               <button
                 className="btn small danger"
@@ -132,7 +124,7 @@ function AddFeedModal({ onClose }: { onClose: () => void }) {
   const [description, setDescription] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [createdSlug, setCreatedSlug] = useState<string | null>(null);
+  const [createdUrl, setCreatedUrl] = useState<string | null>(null);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -144,7 +136,7 @@ function AddFeedModal({ onClose }: { onClose: () => void }) {
         sourceUrl,
         description || undefined
       );
-      setCreatedSlug(resp.feed.feed_slug);
+      setCreatedUrl(resp.feed_url);
       // Trigger sync in background
       api.syncFeed(resp.feed.id).catch(console.error);
     } catch (err) {
@@ -178,16 +170,16 @@ function AddFeedModal({ onClose }: { onClose: () => void }) {
 
           {error && <p className="error">{error}</p>}
 
-          {createdSlug && (
+          {createdUrl && (
             <div className="success-box">
               <p>Feed created! RSS URL:</p>
               <div className="url-row">
-                <code>{feedUrl(createdSlug)}</code>
+                <code>{createdUrl}</code>
                 <button
                   type="button"
                   className="btn small"
                   onClick={() =>
-                    navigator.clipboard.writeText(feedUrl(createdSlug))
+                    navigator.clipboard.writeText(createdUrl)
                   }
                 >
                   Copy
@@ -198,9 +190,9 @@ function AddFeedModal({ onClose }: { onClose: () => void }) {
 
           <div className="modal-actions">
             <button type="button" className="btn" onClick={onClose}>
-              {createdSlug ? "Done" : "Cancel"}
+              {createdUrl ? "Done" : "Cancel"}
             </button>
-            {!createdSlug && (
+            {!createdUrl && (
               <button
                 type="submit"
                 className="btn primary"

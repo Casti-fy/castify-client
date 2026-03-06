@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
-import { listen } from "@tauri-apps/api/event";
 import type { User, SyncProgressEvent } from "./lib/types";
 import { checkAuth, startPeriodicSync } from "./lib/api";
+import { useTauriListener } from "./hooks/useTauriListener";
 import Login from "./pages/Login";
 import FeedsList from "./pages/FeedsList";
 import FeedDetail from "./pages/FeedDetail";
@@ -33,31 +33,21 @@ export default function App() {
   }, [user]);
 
   // Refresh user data when window regains focus (e.g. after Stripe checkout)
-  useEffect(() => {
+  useTauriListener("tauri://focus", () => {
     if (!user) return;
-    const unlisten = listen("tauri://focus", () => {
-      checkAuth()
-        .then((u) => setUser(u))
-        .catch(() => {});
-    });
-    return () => {
-      unlisten.then((fn) => fn());
-    };
+    checkAuth()
+      .then((u) => setUser(u))
+      .catch(() => {});
   }, [user]);
 
   // Listen for sync progress events
-  useEffect(() => {
-    const unlisten = listen<SyncProgressEvent>("sync-progress", (event) => {
-      const { feed_name, step, message } = event.payload;
-      if (step === "done") {
-        setSyncStatus("");
-      } else {
-        setSyncStatus(`[${feed_name}] ${message}`);
-      }
-    });
-    return () => {
-      unlisten.then((fn) => fn());
-    };
+  useTauriListener<SyncProgressEvent>("sync-progress", (event) => {
+    const { feed_name, step, message } = event.payload;
+    if (step === "done") {
+      setSyncStatus("");
+    } else {
+      setSyncStatus(`[${feed_name}] ${message}`);
+    }
   }, []);
 
   if (loading) {

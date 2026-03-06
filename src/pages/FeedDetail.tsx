@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import type { Episode, FeedDetailResponse, User } from "../lib/types";
 import { getPlanLimits } from "../lib/types";
+import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import * as api from "../lib/api";
 
 interface Props {
@@ -20,7 +21,7 @@ export default function FeedDetail({ feedId, user, onBack }: Props) {
   const [detail, setDetail] = useState<FeedDetailResponse | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const { copiedId, copy } = useCopyToClipboard();
 
   const load = () => {
     api.getFeedDetail(feedId).then(setDetail).catch(console.error);
@@ -83,17 +84,13 @@ export default function FeedDetail({ feedId, user, onBack }: Props) {
           <span>{detail.episodes.length} episode{detail.episodes.length !== 1 ? "s" : ""}</span>
         </div>
 
-        <div className={`feed-url-bar${copied ? " feed-url-copied" : ""}`}>
+        <div className="feed-url-bar">
           <code>{detail.feed_url}</code>
           <button
-            className="btn small"
-            onClick={() => {
-              navigator.clipboard.writeText(detail.feed_url);
-              setCopied(true);
-              setTimeout(() => setCopied(false), 1500);
-            }}
+            className={`btn small${copiedId ? " btn-copied" : ""}`}
+            onClick={() => copy(detail.feed_url)}
           >
-            {copied ? "Copied!" : "Copy RSS"}
+            {copiedId ? "Copied!" : "Copy RSS"}
           </button>
         </div>
 
@@ -129,7 +126,7 @@ export default function FeedDetail({ feedId, user, onBack }: Props) {
               <span
                 className={`badge ${ep.status === "ready" ? "badge-ok" : "badge-warn"}`}
               >
-                {ep.status}
+                {ep.status === "ready" ? "ready" : "processing"}
               </span>
             </div>
           </li>

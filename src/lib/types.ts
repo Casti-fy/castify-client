@@ -26,6 +26,7 @@ export interface Feed {
   source_url: string;
   description?: string;
   feed_slug: string;
+  feed_url: string;
   episode_count?: number;
 }
 

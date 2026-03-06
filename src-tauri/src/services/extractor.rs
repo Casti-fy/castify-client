@@ -180,10 +180,18 @@ pub async fn extract_audio(
         }
     }
 
+    args.push("--no-playlist".to_string());
+
+    // YouTube-specific filter: skip premieres and live streams.
+    // SoundCloud doesn't have live_status, so this filter breaks on it.
+    if !url.contains("soundcloud.com") {
+        args.extend([
+            "--match-filter".to_string(),
+            "live_status!=is_upcoming & live_status!=is_live".to_string(),
+        ]);
+    }
+
     args.extend([
-        "--no-playlist".to_string(),
-        "--match-filter".to_string(),
-        "live_status!=is_upcoming & live_status!=is_live".to_string(),
         "--retries".to_string(),
         "3".to_string(),
         "-x".to_string(),

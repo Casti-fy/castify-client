@@ -11,8 +11,8 @@ export interface PlanLimits {
 }
 
 export const PLAN_LIMITS: Record<string, PlanLimits> = {
-  starter: { max_feeds: 1, max_episodes_per_feed: 10, retention_days: 30 },
-  pro: { max_feeds: 20, max_episodes_per_feed: -1, retention_days: -1 },
+  starter: { max_feeds: 3, max_episodes_per_feed: 20, retention_days: 30 },
+  pro: { max_feeds: 15, max_episodes_per_feed: -1, retention_days: 90 },
   unlimited: { max_feeds: -1, max_episodes_per_feed: -1, retention_days: -1 },
 };
 

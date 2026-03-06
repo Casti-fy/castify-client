@@ -14,6 +14,8 @@ pub struct Feed {
     #[serde(rename = "source_url")]
     pub source_url: String,
     pub description: Option<String>,
+    #[serde(rename = "artwork_url")]
+    pub artwork_url: Option<String>,
     #[serde(rename = "feed_slug")]
     pub feed_slug: String,
     #[serde(rename = "feed_url", default)]
@@ -139,6 +141,13 @@ pub struct ErrorResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Thumbnail {
+    pub url: String,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlaylistEntry {
     pub id: Option<String>,
     pub title: Option<String>,
@@ -147,6 +156,13 @@ pub struct PlaylistEntry {
     pub description: Option<String>,
     pub live_status: Option<String>,
     pub availability: Option<String>,
+    #[serde(default)]
+    pub thumbnails: Vec<Thumbnail>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct UpdateFeedRequest {
+    pub artwork_url: String,
 }
 
 // -- Event payloads --

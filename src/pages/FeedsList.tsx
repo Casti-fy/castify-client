@@ -158,7 +158,7 @@ function AddFeedModal({ onClose }: { onClose: () => void }) {
             autoFocus
           />
           <input
-            placeholder="YouTube URL (channel or playlist)"
+            placeholder="Source URL (YouTube, SoundCloud, ...)"
             value={sourceUrl}
             onChange={(e) => setSourceUrl(e.target.value)}
           />

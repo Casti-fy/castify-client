@@ -69,22 +69,32 @@ async fn run_sidecar(
     Ok((exit_code, stdout, stderr))
 }
 
-/// Pass 1: Fast flat-playlist fetch (no per-video requests). Returns basic info only.
-pub async fn fetch_playlist_fast(
+/// Pass 1: Fetch playlist entries. Uses flat-playlist for YouTube (fast, metadata
+/// comes in pass 2) and full playlist for SoundCloud (flat mode lacks titles).
+pub async fn fetch_playlist(
     app: &AppHandle,
     url: &str,
     max_items: u32,
 ) -> Result<Vec<PlaylistEntry>, AppError> {
-    let args = vec![
-        "--ignore-errors".to_string(),
-        "--flat-playlist".to_string(),
+    let is_soundcloud = url.contains("soundcloud.com");
+
+    let mut args = vec!["--ignore-errors".to_string()];
+
+    if !is_soundcloud {
+        // YouTube: flat-playlist is fast, metadata fetched later in pass 2
+        args.push("--flat-playlist".to_string());
+        args.extend([
+            "--match-filter".to_string(),
+            "original_url!*=/shorts/ & live_status!=is_upcoming & live_status!=is_live & availability!=subscriber_only & availability!=needs_premium".to_string(),
+        ]);
+    }
+
+    args.extend([
         "--dump-json".to_string(),
-        "--match-filter".to_string(),
-        "original_url!*=/shorts/ & live_status!=is_upcoming & live_status!=is_live & availability!=subscriber_only & availability!=needs_premium".to_string(),
         "--playlist-end".to_string(),
         max_items.to_string(),
         url.to_string(),
-    ];
+    ]);
 
     let (code, stdout, stderr) = run_sidecar(app, "binaries/yt-dlp", args).await?;
 
@@ -95,22 +105,32 @@ pub async fn fetch_playlist_fast(
     }
 
     let entries: Vec<PlaylistEntry> = parse_playlist_lines(&stdout);
-    log::info!("[fetch_playlist_fast] got {} entries", entries.len());
+    log::info!("[fetch_playlist] got {} entries (soundcloud={})", entries.len(), is_soundcloud);
     Ok(entries)
 }
 
-/// Pass 2: Fetch full metadata for a single video by ID.
+/// Construct the direct URL for a single episode given the feed's source URL
+/// and the episode's ID (as returned by yt-dlp in flat-playlist mode).
+pub fn episode_url(feed_source_url: &str, video_id: &str) -> String {
+    if feed_source_url.contains("soundcloud.com") {
+        format!("https://api.soundcloud.com/tracks/{video_id}")
+    } else {
+        // Default to YouTube
+        format!("https://www.youtube.com/watch?v={video_id}")
+    }
+}
+
+/// Pass 2: Fetch full metadata for a single episode by URL.
 pub async fn fetch_video_metadata(
     app: &AppHandle,
-    video_id: &str,
+    url: &str,
 ) -> Result<PlaylistEntry, AppError> {
-    let url = format!("https://www.youtube.com/watch?v={video_id}");
     let args = vec![
         "--ignore-errors".to_string(),
         "--dump-json".to_string(),
         "--skip-download".to_string(),
         "--no-playlist".to_string(),
-        url,
+        url.to_string(),
     ];
 
     let (code, stdout, stderr) = run_sidecar(app, "binaries/yt-dlp", args).await?;
@@ -140,10 +160,10 @@ fn parse_playlist_lines(stdout: &str) -> Vec<PlaylistEntry> {
 
 pub async fn extract_audio(
     app: &AppHandle,
+    url: &str,
     video_id: &str,
     output_dir: &Path,
 ) -> Result<PathBuf, AppError> {
-    let url = format!("https://www.youtube.com/watch?v={video_id}");
     let output_template = output_dir.join("%(id)s.%(ext)s");
 
     // Build yt-dlp args
@@ -173,7 +193,7 @@ pub async fn extract_audio(
         "0".to_string(),
         "-o".to_string(),
         output_template.to_string_lossy().to_string(),
-        url,
+        url.to_string(),
     ]);
 
     let (code, _stdout, stderr) = run_sidecar(app, "binaries/yt-dlp", args).await?;

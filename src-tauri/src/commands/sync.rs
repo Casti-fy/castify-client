@@ -89,6 +89,20 @@ fn temp_dir_for_feed(feed_id: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("castify-{feed_id}"))
 }
 
+/// Pick the best thumbnail from a list of playlist entries.
+/// Prefers ~500px wide for podcast artwork; falls back to largest available.
+fn best_thumbnail(entries: &[PlaylistEntry]) -> Option<String> {
+    entries.iter()
+        .flat_map(|e| e.thumbnails.iter())
+        .filter(|t| t.width.unwrap_or(0) >= 100)
+        .max_by_key(|t| {
+            let w = t.width.unwrap_or(0);
+            // Prefer 300-500px range (good for podcast artwork), then larger
+            if (300..=500).contains(&w) { 10000 + w } else { w }
+        })
+        .map(|t| t.url.clone())
+}
+
 fn format_upload_date(upload_date: Option<&str>) -> Option<String> {
     upload_date.and_then(|d| {
         if d.len() == 8 {
@@ -121,15 +135,15 @@ async fn get_user_plan(app: &AppHandle) -> String {
 fn plan_max_episodes(plan: &str) -> Option<u32> {
     match plan {
         "pro" | "unlimited" => None, // no limit
-        _ => Some(10),               // starter
+        _ => Some(20),               // starter: 20 episodes per feed
     }
 }
 
 fn plan_max_feeds(plan: &str) -> Option<usize> {
     match plan {
         "unlimited" => None,  // no limit
-        "pro" => Some(20),
-        _ => Some(1),         // starter
+        "pro" => Some(15),
+        _ => Some(3),         // starter: 3 feeds
     }
 }
 
@@ -161,7 +175,7 @@ async fn scan_feed(app: &AppHandle, feed: &Feed, mode: &SyncMode, plan: &str) ->
     let episode_cap = plan_max_episodes(plan);
     let max_items: u32 = episode_cap.unwrap_or(100).min(100);
 
-    let entries = extractor::fetch_playlist_fast(app, &feed.source_url, max_items).await?;
+    let entries = extractor::fetch_playlist(app, &feed.source_url, max_items).await?;
     let new_entries: Vec<&PlaylistEntry> = entries
         .iter()
         .filter(|e| {
@@ -175,6 +189,20 @@ async fn scan_feed(app: &AppHandle, feed: &Feed, mode: &SyncMode, plan: &str) ->
             e.id.as_ref().map_or(true, |id| !existing_ids.contains(id))
         })
         .collect();
+
+    // Set feed artwork from the first entry's thumbnail (once, if not already set)
+    if detail.feed.artwork_url.is_none() {
+        if let Some(thumb_url) = best_thumbnail(&entries) {
+            let state = app.state::<AppState>();
+            let body = UpdateFeedRequest { artwork_url: thumb_url };
+            let _ = state.api.read().await.request_no_content(
+                &format!("/api/v1/feeds/{}", feed.id),
+                "PATCH",
+                Some(&body),
+                true,
+            ).await;
+        }
+    }
 
     if new_entries.is_empty() {
         emit_progress(app, &feed.id, &feed.name, "done", "Already up to date");
@@ -200,8 +228,8 @@ async fn scan_feed(app: &AppHandle, feed: &Feed, mode: &SyncMode, plan: &str) ->
         let create_body = CreateEpisodeRequest {
             video_id,
             title: title.clone(),
-            description: None,
-            pub_date: None,
+            description: entry.description.clone(),
+            pub_date: format_upload_date(entry.upload_date.as_deref()),
             duration_sec: entry.duration.map(|d| d as i64),
         };
 
@@ -303,6 +331,7 @@ async fn download_episode(
     let temp_dir = temp_dir_for_feed(&feed.id);
 
     // Fetch metadata
+    let ep_url = extractor::episode_url(&feed.source_url, &ep.video_id);
     emit_progress(
         app,
         &feed.id,
@@ -310,7 +339,7 @@ async fn download_episode(
         "metadata",
         &format!("Fetching metadata: {}", ep.title),
     );
-    match extractor::fetch_video_metadata(app, &ep.video_id).await {
+    match extractor::fetch_video_metadata(app, &ep_url).await {
         Ok(meta) => {
             let pub_date = format_upload_date(meta.upload_date.as_deref());
             let update_body = UpdateEpisodeMetadataRequest {
@@ -345,7 +374,7 @@ async fn download_episode(
         "download",
         &format!("Downloading: {}", ep.title),
     );
-    match extractor::extract_audio(app, &ep.video_id, &temp_dir).await {
+    match extractor::extract_audio(app, &ep_url, &ep.video_id, &temp_dir).await {
         Ok(_) => {
             let _ = update_episode_status(app, &ep.id, "uploading", None).await;
         }

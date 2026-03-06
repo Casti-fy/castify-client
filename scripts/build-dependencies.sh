@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build yt-dlp (YouTube-only) and minimal ffmpeg for Tauri sidecar bundling.
+# Build yt-dlp and minimal ffmpeg for Tauri sidecar bundling.
 #
 # yt-dlp is built from source with all extractors except YouTube removed,
 # reducing the binary from ~33 MB to ~5-8 MB.
@@ -33,8 +33,7 @@ FFMPEG_VERSION="7.1"
 MACOS_MIN="12.0"
 
 # Extractors to keep (add more here to support additional sites)
-# YTDLP_KEEP_EXTRACTORS="youtube,spotify,soundcloud"
-YTDLP_KEEP_EXTRACTORS="youtube"
+YTDLP_KEEP_EXTRACTORS="youtube,soundcloud"
 
 # Parse arguments
 FORCE=false

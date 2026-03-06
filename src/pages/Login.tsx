@@ -13,8 +13,14 @@ export default function Login({ onLogin }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isRegister && !emailValid) {
+      setError("Please enter a valid email address");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -54,7 +60,7 @@ export default function Login({ onLogin }: Props) {
         <button
           type="submit"
           className="btn primary"
-          disabled={loading || !email || !password}
+          disabled={loading || !email || !password || (isRegister && !emailValid)}
         >
           {loading ? "..." : isRegister ? "Register" : "Login"}
         </button>

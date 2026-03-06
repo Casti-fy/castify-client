@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback } from "react";
-import type { Feed } from "../lib/types";
+import type { Feed, User } from "../lib/types";
+import { getPlanLimits } from "../lib/types";
 import * as api from "../lib/api";
 
 interface Props {
+  user: User;
   onSelectFeed: (feedId: string) => void;
-  onSettings: () => void;
+  onAccount: () => void;
   syncStatus: string;
 }
 
@@ -14,10 +16,13 @@ function feedUrl(slug: string) {
   return `${SERVER_URL}/rss/${slug}.xml`;
 }
 
-export default function FeedsList({ onSelectFeed, onSettings, syncStatus }: Props) {
+export default function FeedsList({ user, onSelectFeed, onAccount, syncStatus }: Props) {
   const [feeds, setFeeds] = useState<Feed[]>([]);
   const [showAdd, setShowAdd] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const limits = getPlanLimits(user.plan);
+  const atFeedLimit = limits.max_feeds >= 0 && feeds.length >= limits.max_feeds;
 
   const load = useCallback(() => {
     api.listFeeds().then(setFeeds).catch(console.error);
@@ -44,16 +49,28 @@ export default function FeedsList({ onSelectFeed, onSettings, syncStatus }: Prop
   return (
     <div className="page">
       <header className="toolbar">
-        <h2>Feeds</h2>
+        <h2>Feeds ({feeds.length}{limits.max_feeds >= 0 ? `/${limits.max_feeds}` : ""})</h2>
         <div className="toolbar-actions">
-          <button className="btn" onClick={() => setShowAdd(true)}>
+          <button
+            className="btn"
+            onClick={() => setShowAdd(true)}
+            disabled={atFeedLimit}
+            title={atFeedLimit ? `Feed limit reached (${limits.max_feeds}). Upgrade your plan.` : undefined}
+          >
             + Add Feed
           </button>
-          <button className="btn" onClick={onSettings}>
-            Settings
+          <button className="btn" onClick={onAccount}>
+            Account
           </button>
         </div>
       </header>
+
+      {atFeedLimit && (
+        <div className="plan-banner">
+          You've reached the {user.plan} plan limit of {limits.max_feeds} feed{limits.max_feeds > 1 ? "s" : ""}.
+          Upgrade for more.
+        </div>
+      )}
 
       {syncStatus && <div className="sync-status">{syncStatus}</div>}
 
@@ -74,7 +91,7 @@ export default function FeedsList({ onSelectFeed, onSettings, syncStatus }: Prop
               onClick={() => onSelectFeed(feed.id)}
             >
               <strong>{feed.name}</strong>
-              <span className="secondary">{feed.source_url}</span>
+              <span className="secondary">{feed.episode_count ?? 0} episode{feed.episode_count !== 1 ? "s" : ""} &middot; {feed.source_url}</span>
             </div>
             <div className="feed-actions">
               <button

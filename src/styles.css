@@ -173,6 +173,17 @@ select:focus {
   align-items: center;
 }
 
+/* Plan banner */
+.plan-banner {
+  padding: 8px 12px;
+  background: rgba(243, 156, 18, 0.1);
+  border: 1px solid rgba(243, 156, 18, 0.3);
+  border-radius: var(--radius);
+  color: var(--warning);
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
 /* Feed list */
 .feed-list,
 .episode-list {
@@ -223,6 +234,30 @@ select:focus {
   padding: 40px;
 }
 
+/* Feed detail layout */
+.feed-detail-page {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.feed-detail-header {
+  flex-shrink: 0;
+}
+
+.feed-meta {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+}
+
+.episode-list-scroll {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
 /* Feed URL bar */
 .feed-url-bar {
   display: flex;
@@ -232,6 +267,21 @@ select:focus {
   background: var(--surface);
   border-radius: var(--radius);
   margin-bottom: 16px;
+}
+
+.feed-url-copied {
+  animation: url-pop 0.3s ease;
+  border-color: var(--success);
+}
+
+.feed-url-copied code {
+  color: var(--success);
+}
+
+@keyframes url-pop {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.02); }
+  100% { transform: scale(1); }
 }
 
 .feed-url-bar code {
@@ -325,18 +375,61 @@ select:focus {
   white-space: nowrap;
 }
 
-/* Settings */
-.settings-content {
+/* Account */
+.account-content {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  max-width: 400px;
+  gap: 12px;
+  max-width: 420px;
+}
+
+.account-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.plan-badge-current {
+  font-weight: 600;
+  color: var(--primary);
+}
+
+.plan-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.plan-table th,
+.plan-table td {
+  padding: 6px 10px;
+  text-align: center;
+  border-bottom: 1px solid var(--border);
+}
+
+.plan-table th {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.plan-table td:first-child,
+.plan-table th:first-child {
+  text-align: left;
+  color: var(--text-secondary);
+}
+
+.plan-active {
+  background: rgba(74, 158, 255, 0.08);
 }
 
 .setting-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  font-size: 13px;
 }
 
 .setting-row label {

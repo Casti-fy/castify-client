@@ -1,11 +1,13 @@
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::error::AppError;
 use crate::models::*;
+use crate::services::keychain;
 use crate::state::AppState;
 
 #[tauri::command]
 pub async fn login(
+    app: AppHandle,
     state: State<'_, AppState>,
     email: String,
     password: String,
@@ -19,11 +21,13 @@ pub async fn login(
         .await?;
 
     state.api.write().await.set_token(Some(resp.token.clone()));
+    let _ = keychain::save_token(&app, &resp.token);
     Ok(resp)
 }
 
 #[tauri::command]
 pub async fn register(
+    app: AppHandle,
     state: State<'_, AppState>,
     email: String,
     password: String,
@@ -37,6 +41,7 @@ pub async fn register(
         .await?;
 
     state.api.write().await.set_token(Some(resp.token.clone()));
+    let _ = keychain::save_token(&app, &resp.token);
     Ok(resp)
 }
 
@@ -51,11 +56,18 @@ pub async fn check_auth(state: State<'_, AppState>) -> Result<User, AppError> {
 }
 
 #[tauri::command]
-pub async fn logout(state: State<'_, AppState>) -> Result<(), AppError> {
+pub async fn logout(app: AppHandle, state: State<'_, AppState>) -> Result<(), AppError> {
     state.api.write().await.set_token(None);
+    let _ = keychain::delete_token(&app);
     // Stop periodic sync
-    let mut handle = state.sync_handle.lock().await;
-    if let Some(h) = handle.take() {
+    let mut handles = state.sync_handles.lock().await;
+    if let Some(h) = handles.scan.take() {
+        h.abort();
+    }
+    if let Some(h) = handles.download.take() {
+        h.abort();
+    }
+    if let Some(h) = handles.upload.take() {
         h.abort();
     }
     Ok(())

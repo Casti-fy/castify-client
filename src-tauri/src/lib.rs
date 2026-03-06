@@ -23,6 +23,14 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .manage(AppState::new(DEFAULT_SERVER_URL))
         .setup(|app| {
+            // Restore token from store
+            if let Ok(token) = services::keychain::get_token(app.handle()) {
+                let state = app.state::<AppState>();
+                tauri::async_runtime::block_on(async {
+                    state.api.write().await.set_token(Some(token));
+                });
+            }
+
             // System tray
             let open = MenuItemBuilder::with_id("open", "Open Castify").build(app)?;
             let quit = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
@@ -71,6 +79,8 @@ pub fn run() {
             commands::sync::stop_periodic_sync,
             commands::settings::get_server_url,
             commands::settings::set_server_url,
+            commands::billing::create_checkout,
+            commands::billing::create_portal,
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
@@ -79,6 +89,15 @@ pub fn run() {
                 api.prevent_close();
             }
         })
-        .run(tauri::generate_context!())
-        .expect("error while running castify");
+        .build(tauri::generate_context!())
+        .expect("error while building castify")
+        .run(|app, event| {
+            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                api.prevent_exit();
+                // Hide all windows instead of quitting
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.hide();
+                }
+            }
+        });
 }

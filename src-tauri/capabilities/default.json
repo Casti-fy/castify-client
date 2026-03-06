@@ -20,6 +20,7 @@
       ]
     },
     "shell:allow-stdin-write",
+    "shell:allow-open",
     "dialog:default",
     "notification:default",
     "store:default"

@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 pub struct User {
     pub id: String,
     pub email: String,
+    pub plan: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15,6 +16,8 @@ pub struct Feed {
     pub description: Option<String>,
     #[serde(rename = "feed_slug")]
     pub feed_slug: String,
+    #[serde(rename = "episode_count", default)]
+    pub episode_count: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -140,6 +143,8 @@ pub struct PlaylistEntry {
     pub upload_date: Option<String>,
     pub duration: Option<f64>,
     pub description: Option<String>,
+    pub live_status: Option<String>,
+    pub availability: Option<String>,
 }
 
 // -- Event payloads --

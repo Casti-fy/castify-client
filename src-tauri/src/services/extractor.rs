@@ -80,7 +80,7 @@ pub async fn fetch_playlist_fast(
         "--flat-playlist".to_string(),
         "--dump-json".to_string(),
         "--match-filter".to_string(),
-        "original_url!*=/shorts/".to_string(),
+        "original_url!*=/shorts/ & live_status!=is_upcoming & live_status!=is_live & availability!=subscriber_only & availability!=needs_premium".to_string(),
         "--playlist-end".to_string(),
         max_items.to_string(),
         url.to_string(),
@@ -162,6 +162,8 @@ pub async fn extract_audio(
 
     args.extend([
         "--no-playlist".to_string(),
+        "--match-filter".to_string(),
+        "live_status!=is_upcoming & live_status!=is_live".to_string(),
         "--retries".to_string(),
         "3".to_string(),
         "-x".to_string(),

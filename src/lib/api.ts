@@ -47,6 +47,12 @@ export const startPeriodicSync = (intervalMinutes: number) =>
 
 export const stopPeriodicSync = () => invoke<void>("stop_periodic_sync");
 
+// Billing
+export const createCheckout = (plan: string) =>
+  invoke<string>("create_checkout", { plan });
+
+export const createPortal = () => invoke<string>("create_portal");
+
 // Settings
 export const getServerUrl = () => invoke<string>("get_server_url");
 

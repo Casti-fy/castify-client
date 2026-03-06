@@ -20,12 +20,7 @@ impl ApiClient {
     }
 
     pub fn set_token(&mut self, token: Option<String>) {
-        self.token = token.clone();
-        if let Some(t) = &token {
-            let _ = crate::services::keychain::save_token(t);
-        } else {
-            let _ = crate::services::keychain::delete_token();
-        }
+        self.token = token;
     }
 
     pub fn set_base_url(&mut self, url: String) {

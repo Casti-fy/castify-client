@@ -5,12 +5,12 @@ import { checkAuth, startPeriodicSync } from "./lib/api";
 import Login from "./pages/Login";
 import FeedsList from "./pages/FeedsList";
 import FeedDetail from "./pages/FeedDetail";
-import Settings from "./pages/Settings";
+import Account from "./pages/Account";
 
 type Page =
   | { name: "feeds" }
   | { name: "feed-detail"; feedId: string }
-  | { name: "settings" };
+  | { name: "account" };
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -30,6 +30,19 @@ export default function App() {
     if (user) {
       startPeriodicSync(30).catch(console.error);
     }
+  }, [user]);
+
+  // Refresh user data when window regains focus (e.g. after Stripe checkout)
+  useEffect(() => {
+    if (!user) return;
+    const unlisten = listen("tauri://focus", () => {
+      checkAuth()
+        .then((u) => setUser(u))
+        .catch(() => {});
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
   }, [user]);
 
   // Listen for sync progress events
@@ -66,25 +79,28 @@ export default function App() {
     <div className="app">
       {page.name === "feeds" && (
         <FeedsList
+          user={user}
           onSelectFeed={(id) => setPage({ name: "feed-detail", feedId: id })}
-          onSettings={() => setPage({ name: "settings" })}
+          onAccount={() => setPage({ name: "account" })}
           syncStatus={syncStatus}
         />
       )}
       {page.name === "feed-detail" && (
         <FeedDetail
           feedId={page.feedId}
+          user={user}
           onBack={() => setPage({ name: "feeds" })}
         />
       )}
-      {page.name === "settings" && (
-        <Settings
+      {page.name === "account" && (
+        <Account
           user={user}
           onBack={() => setPage({ name: "feeds" })}
           onLogout={() => {
             setUser(null);
             setPage({ name: "feeds" });
           }}
+          onUserUpdate={(u) => setUser(u)}
         />
       )}
     </div>

@@ -2,14 +2,35 @@
 name = "castify"
 version = "0.1.0"
 edition = "2021"
+default-run = "castify"
+
+[features]
+default = ["gui"]
+# Desktop app (Tauri + window). Used by default and by `tauri build`.
+gui = [
+  "dep:tauri",
+  "dep:tauri-plugin-shell",
+  "dep:tauri-plugin-dialog",
+  "dep:tauri-plugin-notification",
+  "dep:tauri-plugin-store",
+  "dep:tauri-plugin-log",
+  "dep:tauri-plugin-autostart",
+  "dep:tauri-build",
+]
+# CLI-only binary (castify-cli). Not bundled with the desktop app.
+cli = ["dep:clap", "dep:dirs", "dep:rpassword"]
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon"] }
-tauri-plugin-shell = "2"
-tauri-plugin-dialog = "2"
-tauri-plugin-notification = "2"
-tauri-plugin-store = "2"
-tauri-plugin-log = "2"
+# GUI (optional) – only when building desktop app
+tauri = { version = "2", features = ["tray-icon"], optional = true }
+tauri-plugin-shell = { version = "2", optional = true }
+tauri-plugin-dialog = { version = "2", optional = true }
+tauri-plugin-notification = { version = "2", optional = true }
+tauri-plugin-store = { version = "2", optional = true }
+tauri-plugin-log = { version = "2", optional = true }
+tauri-plugin-autostart = { version = "2", optional = true }
+
+# Shared (always)
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", features = ["json", "stream"] }
@@ -18,9 +39,22 @@ sha1 = "0.10"
 thiserror = "2"
 log = "0.4"
 rand = "0.8"
+# CLI only (not in desktop bundle)
+clap = { version = "4", features = ["derive"], optional = true }
+dirs = { version = "5", optional = true }
+rpassword = { version = "7", optional = true }
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "2", optional = true , features = [] }
+
+[[bin]]
+name = "castify"
+path = "src/main.rs"
+
+[[bin]]
+name = "castify-cli"
+path = "src/bin/castify_cli.rs"
+required-features = ["cli"]
 
 [profile.release]
 panic = "abort"

@@ -1,30 +1,42 @@
-mod commands;
+#[cfg(feature = "cli")]
+pub mod cli;
 mod error;
+#[cfg(feature = "cli")]
+mod storage;
 mod models;
 mod services;
 mod state;
 
-use tauri::{
-    menu::{MenuBuilder, MenuItemBuilder},
-    tray::TrayIconBuilder,
-    Manager, WindowEvent,
-};
+#[cfg(feature = "gui")]
+mod commands;
 
+/// Default API base URL; used by both GUI and CLI when no config is set.
+pub const DEFAULT_SERVER_URL: &str = "http://es.alpharesearch.io:3000";
+
+#[cfg(feature = "gui")]
 use state::AppState;
 
-const DEFAULT_SERVER_URL: &str = "http://es.alpharesearch.io:3000";
-
+#[cfg(feature = "gui")]
 pub fn run() {
+    use tauri::{
+        menu::{MenuBuilder, MenuItemBuilder},
+        tray::TrayIconBuilder,
+        Manager, WindowEvent,
+    };
     tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::new().build())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::default().build())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .manage(AppState::new(DEFAULT_SERVER_URL))
         .setup(|app| {
             // Restore token from store
-            if let Ok(token) = services::keychain::get_token(app.handle()) {
+            if let Ok(token) = crate::services::keychain::get_token(app.handle()) {
                 let state = app.state::<AppState>();
                 tauri::async_runtime::block_on(async {
                     state.api.write().await.set_token(Some(token));

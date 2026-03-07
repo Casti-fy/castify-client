@@ -23,6 +23,9 @@
     "shell:allow-open",
     "dialog:default",
     "notification:default",
-    "store:default"
+    "store:default",
+    "autostart:allow-enable",
+    "autostart:allow-disable",
+    "autostart:allow-is-enabled"
   ]
 }

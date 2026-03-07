@@ -18,8 +18,9 @@ struct PortalResponse {
 pub async fn create_checkout(
     state: State<'_, AppState>,
     plan: String,
+    interval: String,
 ) -> Result<String, AppError> {
-    let body = serde_json::json!({ "plan": plan });
+    let body = serde_json::json!({ "plan": plan, "interval": interval });
     let resp: CheckoutResponse = state
         .api
         .read()

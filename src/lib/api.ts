@@ -48,7 +48,7 @@ export const startPeriodicSync = (intervalMinutes: number) =>
 export const stopPeriodicSync = () => invoke<void>("stop_periodic_sync");
 
 // Billing
-export const createCheckout = (plan: string) =>
-  invoke<string>("create_checkout", { plan });
+export const createCheckout = (plan: string, interval: "month" | "year") =>
+  invoke<string>("create_checkout", { plan, interval });
 
 export const createPortal = () => invoke<string>("create_portal");

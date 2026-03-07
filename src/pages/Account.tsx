@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { open } from "@tauri-apps/plugin-shell";
+import { isEnabled, enable, disable } from "@tauri-apps/plugin-autostart";
 import type { User } from "../lib/types";
 import { PLAN_LIMITS } from "../lib/types";
 import * as api from "../lib/api";
@@ -12,8 +13,29 @@ interface Props {
 }
 
 const PLAN_NAMES = ["starter", "pro", "unlimited"] as const;
-const PLAN_LABELS: Record<string, string> = { starter: "Starter", pro: "Pro", unlimited: "Unlimited" };
-const PLAN_PRICES: Record<string, string> = { starter: "Free", pro: "$6.99/mo", unlimited: "$9.99/mo" };
+const PLAN_LABELS: Record<string, string> = { starter: "Free", pro: "Pro", unlimited: "Unlimited" };
+
+type BillingInterval = "month" | "year";
+
+const PLAN_PRICING: Record<string, { month: number; year: number }> = {
+  starter: { month: 0, year: 0 },
+  pro: { month: 4.99, year: 49 },
+  unlimited: { month: 8.99, year: 79 },
+};
+
+function fmtPrice(plan: string, interval: BillingInterval): string {
+  const p = PLAN_PRICING[plan];
+  if (!p || p.month === 0) return "Free";
+  if (interval === "month") return `$${p.month}/mo`;
+  return `$${p.year}/yr`;
+}
+
+function annualDiscount(plan: string): number {
+  const p = PLAN_PRICING[plan];
+  if (!p || p.month === 0) return 0;
+  const monthlyCost = p.month * 12;
+  return Math.round((1 - p.year / monthlyCost) * 100);
+}
 
 const INTERVALS = [
   { label: "15 min", value: 15 },
@@ -22,23 +44,39 @@ const INTERVALS = [
   { label: "120 min", value: 120 },
 ];
 
+const STARTER_ONLY_INTERVAL = 120;
+
 function fmtLimit(v: number) { return v < 0 ? "\u221E" : String(v); }
 function fmtRetention(d: number) { return d < 0 ? "Forever" : `${d}d`; }
 
 export default function Account({ user, onBack, onLogout, onUserUpdate }: Props) {
-  const [interval, setInterval] = useState(30);
+  const [syncInterval, setSyncInterval] = useState(30);
+  const [billingInterval, setBillingInterval] = useState<BillingInterval>("year");
   const [loading, setLoading] = useState<string | null>(null);
+  const [launchAtStartup, setLaunchAtStartup] = useState(false);
 
-  const handleIntervalChange = (value: number) => {
-    setInterval(value);
+  useEffect(() => {
+    isEnabled().then(setLaunchAtStartup).catch(() => {});
+  }, []);
+
+  // Starter plan: only 120 min allowed; force interval and backend to 120
+  useEffect(() => {
+    if (user.plan === "starter" && syncInterval !== STARTER_ONLY_INTERVAL) {
+      setSyncInterval(STARTER_ONLY_INTERVAL);
+      api.stopPeriodicSync().then(() => api.startPeriodicSync(STARTER_ONLY_INTERVAL)).catch(console.error);
+    }
+  }, [user.plan]);
+
+  const handleSyncIntervalChange = (value: number) => {
+    if (user.plan === "starter" && value !== STARTER_ONLY_INTERVAL) return;
+    setSyncInterval(value);
     api.stopPeriodicSync().then(() => api.startPeriodicSync(value)).catch(console.error);
   };
 
   const handleUpgrade = async (plan: string) => {
     try {
       setLoading(plan);
-      const url = await api.createCheckout(plan);
-      console.log("Checkout URL:", url);
+      const url = await api.createCheckout(plan, billingInterval);
       if (url) {
         await open(url);
       }
@@ -70,6 +108,19 @@ export default function Account({ user, onBack, onLogout, onUserUpdate }: Props)
     }
   };
 
+  const handleLaunchAtStartupChange = async (checked: boolean) => {
+    try {
+      if (checked) {
+        await enable();
+      } else {
+        await disable();
+      }
+      setLaunchAtStartup(checked);
+    } catch (e) {
+      console.error("Launch at startup error:", e);
+    }
+  };
+
   return (
     <div className="page">
       <header className="toolbar">
@@ -88,6 +139,21 @@ export default function Account({ user, onBack, onLogout, onUserUpdate }: Props)
           <span className="plan-badge-current">{PLAN_LABELS[user.plan] || user.plan}</span>
         </div>
 
+        <div className="billing-toggle">
+          <button
+            className={`btn small ${billingInterval === "month" ? "primary" : ""}`}
+            onClick={() => setBillingInterval("month")}
+          >
+            Monthly
+          </button>
+          <button
+            className={`btn small ${billingInterval === "year" ? "primary" : ""}`}
+            onClick={() => setBillingInterval("year")}
+          >
+            Annual {annualDiscount("pro") > 0 && <span className="badge badge-discount">Save {annualDiscount("pro")}%</span>}
+          </button>
+        </div>
+
         <table className="plan-table">
           <thead>
             <tr>
@@ -99,7 +165,7 @@ export default function Account({ user, onBack, onLogout, onUserUpdate }: Props)
           </thead>
           <tbody>
             {([
-              ["Price", (p: string) => PLAN_PRICES[p]],
+              ["Price", (p: string) => fmtPrice(p, billingInterval)],
               ["Feeds", (p: string) => fmtLimit(PLAN_LIMITS[p].max_feeds)],
               ["Eps / feed", (p: string) => fmtLimit(PLAN_LIMITS[p].max_episodes_per_feed)],
               ["Retention", (p: string) => fmtRetention(PLAN_LIMITS[p].retention_days)],
@@ -156,11 +222,35 @@ export default function Account({ user, onBack, onLogout, onUserUpdate }: Props)
         )}
 
         <div className="setting-row">
+          <label>Launch at startup</label>
+          <label className="setting-toggle">
+            <input
+              type="checkbox"
+              checked={launchAtStartup}
+              onChange={(e) => handleLaunchAtStartupChange(e.target.checked)}
+            />
+            <span>{launchAtStartup ? "On" : "Off"}</span>
+          </label>
+        </div>
+
+        <div className="setting-row">
           <label>Auto-sync</label>
-          <select value={interval} onChange={(e) => handleIntervalChange(Number(e.target.value))}>
-            {INTERVALS.map((opt) => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
+          <select
+            value={syncInterval}
+            onChange={(e) => handleSyncIntervalChange(Number(e.target.value))}
+          >
+            {INTERVALS.map((opt) => {
+              const starterLocked = user.plan === "starter" && opt.value !== STARTER_ONLY_INTERVAL;
+              return (
+                <option
+                  key={opt.value}
+                  value={opt.value}
+                  disabled={starterLocked}
+                >
+                  {opt.label}{starterLocked ? " (Upgrade)" : ""}
+                </option>
+              );
+            })}
           </select>
         </div>
       </div>

@@ -89,6 +89,7 @@ export default function App() {
           onLogout={() => {
             setUser(null);
             setPage({ name: "feeds" });
+            setSyncStatus("");
           }}
           onUserUpdate={(u) => setUser(u)}
         />

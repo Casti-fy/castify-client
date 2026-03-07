@@ -156,9 +156,15 @@ fn cap_feeds_for_plan(feeds: Vec<Feed>, plan: &str) -> Vec<Feed> {
     }
 }
 
+/// Minimum delay between scanning each feed to avoid a burst of "Fetching playlist" and rate limits.
+const SCAN_FEED_SPACING: Duration = Duration::from_secs(2);
+
 async fn run_scan(app: &AppHandle, feeds: &[Feed], mode: &SyncMode) {
     let plan = get_user_plan(app).await;
-    for feed in feeds {
+    for (i, feed) in feeds.iter().enumerate() {
+        if i > 0 {
+            tokio::time::sleep(SCAN_FEED_SPACING).await;
+        }
         if let Err(e) = scan_feed(app, feed, mode, &plan).await {
             log::warn!("Scan feed {} failed: {e}", feed.name);
         }
@@ -566,22 +572,21 @@ pub async fn start_periodic_sync(
     let download_interval = Duration::from_secs(120);
     let upload_interval = Duration::from_secs(30);
 
-    // Scan loop
+    // Scan loop: wait one full interval before first scan so we don't hit playlists immediately on startup
     let app_scan = app.clone();
     handles.scan = Some(tokio::spawn(async move {
         loop {
+            tokio::time::sleep(scan_interval).await;
             let feeds = match fetch_all_feeds(&app_scan).await {
                 Ok(f) => f,
                 Err(e) => {
                     log::warn!("Periodic scan: failed to fetch feeds: {e}");
-                    tokio::time::sleep(scan_interval).await;
                     continue;
                 }
             };
             let plan = get_user_plan(&app_scan).await;
             let feeds = cap_feeds_for_plan(feeds, &plan);
             run_scan(&app_scan, &feeds, &SyncMode::Periodic).await;
-            tokio::time::sleep(scan_interval).await;
         }
     }));
 

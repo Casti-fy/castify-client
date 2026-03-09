@@ -11,7 +11,7 @@ mod state;
 mod commands;
 
 /// Default API base URL; used by both GUI and CLI when no config is set.
-pub const DEFAULT_SERVER_URL: &str = "http://es.alpharesearch.io:3000";
+pub const DEFAULT_SERVER_URL: &str = "https://casti.fyi";
 
 #[cfg(feature = "gui")]
 use state::AppState;
@@ -89,8 +89,6 @@ pub fn run() {
             commands::sync::sync_feed,
             commands::sync::start_periodic_sync,
             commands::sync::stop_periodic_sync,
-            commands::settings::get_server_url,
-            commands::settings::set_server_url,
             commands::billing::create_checkout,
             commands::billing::create_portal,
         ])

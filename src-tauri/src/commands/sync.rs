@@ -10,11 +10,6 @@ use crate::models::*;
 use crate::services::{extractor, uploader};
 use crate::state::AppState;
 
-enum SyncMode {
-    Force,
-    Periodic,
-}
-
 fn cpu_count() -> usize {
     std::thread::available_parallelism()
         .map(|n| n.get())
@@ -83,6 +78,19 @@ async fn update_episode_status(
         )
         .await;
     result
+}
+
+/// Fetch all feeds, resolve user plan, and cap to plan limits. Returns None on error.
+async fn fetch_capped_feeds(app: &AppHandle, label: &str) -> Option<Vec<Feed>> {
+    let feeds = match fetch_all_feeds(app).await {
+        Ok(f) => f,
+        Err(e) => {
+            log::warn!("{label}: failed to fetch feeds: {e}");
+            return None;
+        }
+    };
+    let plan = get_user_plan(app).await;
+    Some(cap_feeds_for_plan(feeds, &plan))
 }
 
 fn temp_dir_for_feed(feed_id: &str) -> std::path::PathBuf {
@@ -159,19 +167,19 @@ fn cap_feeds_for_plan(feeds: Vec<Feed>, plan: &str) -> Vec<Feed> {
 /// Minimum delay between scanning each feed to avoid a burst of "Fetching playlist" and rate limits.
 const SCAN_FEED_SPACING: Duration = Duration::from_secs(2);
 
-async fn run_scan(app: &AppHandle, feeds: &[Feed], mode: &SyncMode) {
+async fn run_scan(app: &AppHandle, feeds: &[Feed]) {
     let plan = get_user_plan(app).await;
     for (i, feed) in feeds.iter().enumerate() {
         if i > 0 {
             tokio::time::sleep(SCAN_FEED_SPACING).await;
         }
-        if let Err(e) = scan_feed(app, feed, mode, &plan).await {
+        if let Err(e) = scan_feed(app, feed, &plan).await {
             log::warn!("Scan feed {} failed: {e}", feed.name);
         }
     }
 }
 
-async fn scan_feed(app: &AppHandle, feed: &Feed, mode: &SyncMode, plan: &str) -> Result<(), AppError> {
+async fn scan_feed(app: &AppHandle, feed: &Feed, plan: &str) -> Result<(), AppError> {
     emit_progress(app, &feed.id, &feed.name, "fetch", "Fetching playlist...");
 
     let detail = fetch_feed_detail(app, &feed.id).await?;
@@ -538,7 +546,7 @@ pub async fn sync_feed(app: AppHandle, feed_id: String) -> Result<(), AppError> 
     let feeds = vec![detail.feed];
 
     // Pass 1: Scan (blocking)
-    run_scan(&app, &feeds, &SyncMode::Force).await;
+    run_scan(&app, &feeds).await;
 
     // Pass 2 & 3: Download then Upload (background)
     tokio::spawn(async move {
@@ -569,7 +577,7 @@ pub async fn start_periodic_sync(
     }
 
     let scan_interval = Duration::from_secs(interval_minutes * 60);
-    let download_interval = Duration::from_secs(120);
+    let download_interval = Duration::from_secs(30);
     let upload_interval = Duration::from_secs(30);
 
     // Scan loop: wait one full interval before first scan so we don't hit playlists immediately on startup
@@ -577,16 +585,11 @@ pub async fn start_periodic_sync(
     handles.scan = Some(tokio::spawn(async move {
         loop {
             tokio::time::sleep(scan_interval).await;
-            let feeds = match fetch_all_feeds(&app_scan).await {
-                Ok(f) => f,
-                Err(e) => {
-                    log::warn!("Periodic scan: failed to fetch feeds: {e}");
-                    continue;
-                }
+            let feeds = match fetch_capped_feeds(&app_scan, "Periodic scan").await {
+                Some(f) => f,
+                None => continue,
             };
-            let plan = get_user_plan(&app_scan).await;
-            let feeds = cap_feeds_for_plan(feeds, &plan);
-            run_scan(&app_scan, &feeds, &SyncMode::Periodic).await;
+            run_scan(&app_scan, &feeds).await;
         }
     }));
 
@@ -594,16 +597,13 @@ pub async fn start_periodic_sync(
     let app_dl = app.clone();
     handles.download = Some(tokio::spawn(async move {
         loop {
-            let feeds = match fetch_all_feeds(&app_dl).await {
-                Ok(f) => f,
-                Err(e) => {
-                    log::warn!("Periodic download: failed to fetch feeds: {e}");
+            let feeds = match fetch_capped_feeds(&app_dl, "Periodic download").await {
+                Some(f) => f,
+                None => {
                     tokio::time::sleep(download_interval).await;
                     continue;
                 }
             };
-            let plan = get_user_plan(&app_dl).await;
-            let feeds = cap_feeds_for_plan(feeds, &plan);
             run_downloads(&app_dl, &feeds, false).await;
             tokio::time::sleep(download_interval).await;
         }
@@ -613,16 +613,13 @@ pub async fn start_periodic_sync(
     let app_ul = app.clone();
     handles.upload = Some(tokio::spawn(async move {
         loop {
-            let feeds = match fetch_all_feeds(&app_ul).await {
-                Ok(f) => f,
-                Err(e) => {
-                    log::warn!("Periodic upload: failed to fetch feeds: {e}");
+            let feeds = match fetch_capped_feeds(&app_ul, "Periodic upload").await {
+                Some(f) => f,
+                None => {
                     tokio::time::sleep(upload_interval).await;
                     continue;
                 }
             };
-            let plan = get_user_plan(&app_ul).await;
-            let feeds = cap_feeds_for_plan(feeds, &plan);
             run_uploads(&app_ul, &feeds).await;
             tokio::time::sleep(upload_interval).await;
         }

@@ -171,7 +171,7 @@ jobs:
       - name: Build castify-cli
         run: |
           cd src-tauri
-          cargo build --release --bin castify-cli --no-default-features --features cli --target ${{ matrix.target }}
+          cargo build --release -p castify-cli --target ${{ matrix.target }}
       - name: Package castify-cli
         shell: bash
         run: |

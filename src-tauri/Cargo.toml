@@ -1,3 +1,6 @@
+[workspace]
+members = [".", "cli"]
+
 [package]
 name = "castify"
 version = "0.1.0"
@@ -17,7 +20,7 @@ gui = [
   "dep:tauri-plugin-autostart",
   "dep:tauri-build",
 ]
-# CLI-only binary (castify-cli). Not bundled with the desktop app.
+# CLI-only library support (used by castify-cli package).
 cli = ["dep:clap", "dep:dirs", "dep:rpassword"]
 
 [dependencies]
@@ -50,11 +53,6 @@ tauri-build = { version = "2", optional = true , features = [] }
 [[bin]]
 name = "castify"
 path = "src/main.rs"
-
-[[bin]]
-name = "castify-cli"
-path = "src/bin/castify_cli.rs"
-required-features = ["cli"]
 
 [profile.release]
 panic = "abort"

@@ -1,58 +1,33 @@
-use tauri::State;
+use tauri::AppHandle;
 
 use crate::error::AppError;
-use crate::models::*;
-use crate::state::AppState;
+use crate::models::{CreateFeedResponse, Feed, FeedDetailResponse};
+use crate::services::feeds as feeds_service;
 
 #[tauri::command]
-pub async fn list_feeds(state: State<'_, AppState>) -> Result<Vec<Feed>, AppError> {
-    state
-        .api
-        .read()
-        .await
-        .request::<Vec<Feed>>("/api/v1/feeds", "GET", true)
-        .await
+pub async fn list_feeds(app: AppHandle) -> Result<Vec<Feed>, AppError> {
+    feeds_service::fetch_all_feeds(&app).await
 }
 
 #[tauri::command]
 pub async fn create_feed(
-    state: State<'_, AppState>,
+    app: AppHandle,
     name: String,
     source_url: String,
     description: Option<String>,
 ) -> Result<CreateFeedResponse, AppError> {
-    let body = CreateFeedRequest {
-        name,
-        source_url,
-        description,
-    };
-    state
-        .api
-        .read()
-        .await
-        .request_with_body("/api/v1/feeds", "POST", Some(&body), true)
-        .await
+    feeds_service::create_feed(&app, name, source_url, description).await
 }
 
 #[tauri::command]
 pub async fn get_feed_detail(
-    state: State<'_, AppState>,
+    app: AppHandle,
     feed_id: String,
 ) -> Result<FeedDetailResponse, AppError> {
-    state
-        .api
-        .read()
-        .await
-        .request::<FeedDetailResponse>(&format!("/api/v1/feeds/{feed_id}"), "GET", true)
-        .await
+    feeds_service::fetch_feed_detail(&app, &feed_id).await
 }
 
 #[tauri::command]
-pub async fn delete_feed(state: State<'_, AppState>, feed_id: String) -> Result<(), AppError> {
-    state
-        .api
-        .read()
-        .await
-        .request_no_content::<()>(&format!("/api/v1/feeds/{feed_id}"), "DELETE", None, true)
-        .await
+pub async fn delete_feed(app: AppHandle, feed_id: String) -> Result<(), AppError> {
+    feeds_service::delete_feed(&app, &feed_id).await
 }

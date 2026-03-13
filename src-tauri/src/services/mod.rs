@@ -1,6 +1,12 @@
 pub mod api_client;
-#[cfg(feature = "gui")]
+pub mod auth;
+pub mod billing;
+pub mod episode;
 pub mod extractor;
-#[cfg(feature = "gui")]
+pub mod feeds;
 pub mod keychain;
+mod sync_download;
+mod sync_scan;
+mod sync_upload;
+pub mod sync;
 pub mod uploader;

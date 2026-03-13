@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
 import type { Feed, User } from "../lib/types";
-import { getPlanLimits } from "../lib/types";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import * as api from "../lib/api";
 
@@ -17,7 +16,7 @@ export default function FeedsList({ user, onSelectFeed, onAccount, syncStatus }:
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const { copiedId, copy } = useCopyToClipboard();
 
-  const limits = getPlanLimits(user.plan);
+  const limits = user.limits;
   const atFeedLimit = limits.max_feeds >= 0 && feeds.length >= limits.max_feeds;
 
   const load = useCallback(() => {

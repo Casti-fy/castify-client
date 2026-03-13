@@ -1,23 +1,16 @@
-export interface User {
-  id: string;
-  email: string;
-  plan: string;
-}
-
 export interface PlanLimits {
   max_feeds: number; // -1 = unlimited
   max_episodes_per_feed: number; // -1 = unlimited
   retention_days: number; // -1 = unlimited
+  max_file_size: number;
+  max_total_file_size: number;
 }
 
-export const PLAN_LIMITS: Record<string, PlanLimits> = {
-  starter: { max_feeds: 3, max_episodes_per_feed: 20, retention_days: 30 },
-  pro: { max_feeds: 15, max_episodes_per_feed: -1, retention_days: 90 },
-  unlimited: { max_feeds: -1, max_episodes_per_feed: -1, retention_days: -1 },
-};
-
-export function getPlanLimits(plan: string): PlanLimits {
-  return PLAN_LIMITS[plan] || PLAN_LIMITS.starter;
+export interface User {
+  id: string;
+  email: string;
+  plan: string;
+  limits: PlanLimits;
 }
 
 export interface Feed {

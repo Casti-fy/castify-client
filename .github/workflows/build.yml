@@ -144,53 +144,8 @@ jobs:
             src-tauri/target/${{ matrix.target }}/release/bundle/**/*.AppImage
           retention-days: 7
 
-  build-cli:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: macos-latest
-            target: aarch64-apple-darwin
-          - platform: macos-latest
-            target: x86_64-apple-darwin
-          # - platform: windows-latest
-          #   target: x86_64-pc-windows-msvc
-          - platform: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-    runs-on: ${{ matrix.platform }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-      - name: Rust cache
-        uses: swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri -> target
-      - name: Build castify-cli
-        run: |
-          cd src-tauri
-          cargo build --release -p castify-cli --target ${{ matrix.target }}
-      - name: Package castify-cli
-        shell: bash
-        run: |
-          cd src-tauri/target/${{ matrix.target }}/release
-          mkdir -p ../../../../cli-out
-          if [ "${{ matrix.platform }}" = "windows-latest" ]; then
-            zip ../../../../cli-out/castify-cli-${{ matrix.target }}.zip castify-cli.exe
-          else
-            tar czf ../../../../cli-out/castify-cli-${{ matrix.target }}.tar.gz castify-cli
-          fi
-      - name: Upload castify-cli artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: castify-cli-${{ matrix.target }}
-          path: src-tauri/cli-out/
-          retention-days: 7
-
   release:
-    needs: [build, build-cli]
+    needs: [build]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
 
@@ -215,8 +170,6 @@ jobs:
             artifacts/**/*.exe
             artifacts/**/*.deb
             artifacts/**/*.AppImage
-            artifacts/**/castify-cli-*.tar.gz
-            artifacts/**/castify-cli-*.zip
           body: |
             ## Castify ${{ github.ref_name }}
 
@@ -230,7 +183,5 @@ jobs:
             | Windows 10+ | `.exe` (NSIS installer) |
             | Linux | `.deb` or `.AppImage` |
 
-            ### CLI (castify-cli)
-            For the standalone CLI (no GUI), download the archive for your platform: `castify-cli-<target>.tar.gz` or `.zip` (Windows). Unpack and put the binary in your PATH. See [INSTALL-CLI.md](https://github.com/Apollo-Audio/castify-client/blob/main/docs/INSTALL-CLI.md).
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}

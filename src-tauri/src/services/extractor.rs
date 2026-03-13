@@ -105,7 +105,7 @@ pub async fn fetch_playlist(
     }
 
     let entries: Vec<PlaylistEntry> = parse_playlist_lines(&stdout);
-    log::info!("[fetch_playlist] got {} entries (soundcloud={})", entries.len(), is_soundcloud);
+    log::info!("[fetch_playlist] got {} entries", entries.len());
     Ok(entries)
 }
 

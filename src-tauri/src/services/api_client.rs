@@ -23,6 +23,10 @@ impl ApiClient {
         self.token = token;
     }
 
+    pub fn has_token(&self) -> bool {
+        self.token.is_some()
+    }
+
     fn build_request<B: Serialize>(
         &self,
         path: &str,

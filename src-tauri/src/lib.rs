@@ -1,22 +1,15 @@
-#[cfg(feature = "cli")]
-pub mod cli;
 mod error;
-#[cfg(feature = "cli")]
-mod storage;
 mod models;
 mod services;
 mod state;
 
-#[cfg(feature = "gui")]
 mod commands;
 
-/// Default API base URL; used by both GUI and CLI when no config is set.
+/// Default API base URL
 pub const DEFAULT_SERVER_URL: &str = "https://casti.fyi";
 
-#[cfg(feature = "gui")]
 use state::AppState;
 
-#[cfg(feature = "gui")]
 pub fn run() {
     use tauri::{
         menu::{MenuBuilder, MenuItemBuilder},
@@ -37,11 +30,18 @@ pub fn run() {
         .setup(|app| {
             // Restore token from store
             if let Ok(token) = crate::services::keychain::get_token(app.handle()) {
+                // TODO: Should check if the token expired and request a new one?
                 let state = app.state::<AppState>();
                 tauri::async_runtime::block_on(async {
                     state.api.write().await.set_token(Some(token));
                 });
             }
+            
+            // Auto-start periodic sync if authenticated
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                services::sync::auto_start_sync(&handle).await;
+            });
 
             // System tray
             let open = MenuItemBuilder::with_id("open", "Open Castify").build(app)?;
@@ -82,13 +82,14 @@ pub fn run() {
             commands::auth::register,
             commands::auth::check_auth,
             commands::auth::logout,
+            commands::auth::fetch_plans,
             commands::feeds::list_feeds,
             commands::feeds::create_feed,
             commands::feeds::get_feed_detail,
             commands::feeds::delete_feed,
             commands::sync::sync_feed,
-            commands::sync::start_periodic_sync,
-            commands::sync::stop_periodic_sync,
+            commands::sync::get_sync_interval,
+            commands::sync::set_sync_interval,
             commands::billing::create_checkout,
             commands::billing::create_portal,
         ])

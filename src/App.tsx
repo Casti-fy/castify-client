@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import type { User, SyncProgressEvent } from "./lib/types";
-import { checkAuth, startPeriodicSync } from "./lib/api";
+import { checkAuth } from "./lib/api";
 import { useTauriListener } from "./hooks/useTauriListener";
 import Login from "./pages/Login";
 import FeedsList from "./pages/FeedsList";
@@ -25,12 +25,6 @@ export default function App() {
       .finally(() => setLoading(false));
   }, []);
 
-  // Start periodic sync when logged in
-  useEffect(() => {
-    if (user) {
-      startPeriodicSync(30).catch(console.error);
-    }
-  }, [user]);
 
   // Refresh user data when window regains focus (e.g. after Stripe checkout)
   useTauriListener("tauri://focus", () => {

@@ -1,6 +1,3 @@
-[workspace]
-members = [".", "cli"]
-
 [package]
 name = "castify"
 version = "0.1.0"
@@ -20,8 +17,6 @@ gui = [
   "dep:tauri-plugin-autostart",
   "dep:tauri-build",
 ]
-# CLI-only library support (used by castify-cli package).
-cli = ["dep:clap", "dep:dirs", "dep:rpassword"]
 
 [dependencies]
 # GUI (optional) – only when building desktop app

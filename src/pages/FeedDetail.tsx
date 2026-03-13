@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import type { Episode, FeedDetailResponse, User } from "../lib/types";
-import { getPlanLimits } from "../lib/types";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import * as api from "../lib/api";
 
@@ -17,7 +16,7 @@ function formatDuration(sec: number): string {
 }
 
 export default function FeedDetail({ feedId, user, onBack }: Props) {
-  const limits = getPlanLimits(user.plan);
+  const limits = user.limits;
   const [detail, setDetail] = useState<FeedDetailResponse | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);

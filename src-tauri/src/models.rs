@@ -1,10 +1,20 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlanLimits {
+    pub max_feeds: i64,
+    pub max_episodes_per_feed: i64,
+    pub retention_days: i64,
+    pub max_file_size: i64,
+    pub max_total_file_size: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct User {
     pub id: String,
     pub email: String,
     pub plan: String,
+    pub limits: PlanLimits,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -140,29 +150,15 @@ pub struct ErrorResponse {
     pub error: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Thumbnail {
-    pub url: String,
-    pub width: Option<u32>,
-    pub height: Option<u32>,
-}
-
+// Typed scaffold, schema for JSON dictionary comming from yt-dlp
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlaylistEntry {
     pub id: Option<String>,
     pub title: Option<String>,
     pub upload_date: Option<String>,
+    pub timestamp: Option<i64>, // sound cloud
     pub duration: Option<f64>,
     pub description: Option<String>,
-    pub live_status: Option<String>,
-    pub availability: Option<String>,
-    #[serde(default)]
-    pub thumbnails: Vec<Thumbnail>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct UpdateFeedRequest {
-    pub artwork_url: String,
 }
 
 // -- Event payloads --

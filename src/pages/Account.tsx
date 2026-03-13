@@ -1,8 +1,7 @@
 import { useState, useEffect } from "react";
 import { open } from "@tauri-apps/plugin-shell";
 import { isEnabled, enable, disable } from "@tauri-apps/plugin-autostart";
-import type { User } from "../lib/types";
-import { PLAN_LIMITS } from "../lib/types";
+import type { User, PlanLimits } from "../lib/types";
 import * as api from "../lib/api";
 
 interface Props {
@@ -22,6 +21,8 @@ const PLAN_PRICING: Record<string, { month: number; year: number }> = {
   pro: { month: 4.99, year: 49 },
   unlimited: { month: 8.99, year: 79 },
 };
+
+const SHOW_SUBSCRIPTION_SECTION = false;
 
 function fmtPrice(plan: string, interval: BillingInterval): string {
   const p = PLAN_PRICING[plan];
@@ -54,23 +55,27 @@ export default function Account({ user, onBack, onLogout, onUserUpdate }: Props)
   const [billingInterval, setBillingInterval] = useState<BillingInterval>("year");
   const [loading, setLoading] = useState<string | null>(null);
   const [launchAtStartup, setLaunchAtStartup] = useState(false);
+  const [allPlanLimits, setAllPlanLimits] = useState<Record<string, PlanLimits> | null>(null);
 
+  // Load persisted sync interval, autostart setting, and plan limits
   useEffect(() => {
     isEnabled().then(setLaunchAtStartup).catch(() => {});
+    api.getSyncInterval().then(setSyncInterval).catch(() => {});
+    api.fetchPlans().then(setAllPlanLimits).catch(() => {});
   }, []);
 
-  // Starter plan: only 120 min allowed; force interval and backend to 120
+  // Starter plan: only 120 min allowed; force interval to 120
   useEffect(() => {
     if (user.plan === "starter" && syncInterval !== STARTER_ONLY_INTERVAL) {
       setSyncInterval(STARTER_ONLY_INTERVAL);
-      api.stopPeriodicSync().then(() => api.startPeriodicSync(STARTER_ONLY_INTERVAL)).catch(console.error);
+      api.setSyncInterval(STARTER_ONLY_INTERVAL).catch(console.error);
     }
   }, [user.plan]);
 
   const handleSyncIntervalChange = (value: number) => {
     if (user.plan === "starter" && value !== STARTER_ONLY_INTERVAL) return;
     setSyncInterval(value);
-    api.stopPeriodicSync().then(() => api.startPeriodicSync(value)).catch(console.error);
+    api.setSyncInterval(value).catch(console.error);
   };
 
   const handleUpgrade = async (plan: string) => {
@@ -139,86 +144,90 @@ export default function Account({ user, onBack, onLogout, onUserUpdate }: Props)
           <span className="plan-badge-current">{PLAN_LABELS[user.plan] || user.plan}</span>
         </div>
 
-        <div className="billing-toggle">
-          <button
-            className={`btn small ${billingInterval === "month" ? "primary" : ""}`}
-            onClick={() => setBillingInterval("month")}
-          >
-            Monthly
-          </button>
-          <button
-            className={`btn small ${billingInterval === "year" ? "primary" : ""}`}
-            onClick={() => setBillingInterval("year")}
-          >
-            Annual {annualDiscount("pro") > 0 && <span className="badge badge-discount">Save {annualDiscount("pro")}%</span>}
-          </button>
-        </div>
+        {SHOW_SUBSCRIPTION_SECTION && (
+          <>
+            <div className="billing-toggle">
+              <button
+                className={`btn small ${billingInterval === "month" ? "primary" : ""}`}
+                onClick={() => setBillingInterval("month")}
+              >
+                Monthly
+              </button>
+              <button
+                className={`btn small ${billingInterval === "year" ? "primary" : ""}`}
+                onClick={() => setBillingInterval("year")}
+              >
+                Annual {annualDiscount("pro") > 0 && <span className="badge badge-discount">Save {annualDiscount("pro")}%</span>}
+              </button>
+            </div>
 
-        <table className="plan-table">
-          <thead>
-            <tr>
-              <th />
-              {PLAN_NAMES.map((p) => (
-                <th key={p} className={p === user.plan ? "plan-active" : ""}>{PLAN_LABELS[p]}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {([
-              ["Price", (p: string) => fmtPrice(p, billingInterval)],
-              ["Feeds", (p: string) => fmtLimit(PLAN_LIMITS[p].max_feeds)],
-              ["Eps / feed", (p: string) => fmtLimit(PLAN_LIMITS[p].max_episodes_per_feed)],
-              ["Retention", (p: string) => fmtRetention(PLAN_LIMITS[p].retention_days)],
-            ] as [string, (p: string) => string][]).map(([label, fn]) => (
-              <tr key={label}>
-                <td>{label}</td>
-                {PLAN_NAMES.map((p) => (
-                  <td key={p} className={p === user.plan ? "plan-active" : ""}>{fn(p)}</td>
+            <table className="plan-table">
+              <thead>
+                <tr>
+                  <th />
+                  {PLAN_NAMES.map((p) => (
+                    <th key={p} className={p === user.plan ? "plan-active" : ""}>{PLAN_LABELS[p]}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {allPlanLimits && ([
+                  ["Price", (p: string) => fmtPrice(p, billingInterval)],
+                  ["Feeds", (p: string) => fmtLimit(allPlanLimits[p]?.max_feeds ?? 0)],
+                  ["Eps / feed", (p: string) => fmtLimit(allPlanLimits[p]?.max_episodes_per_feed ?? 0)],
+                  ["Retention", (p: string) => fmtRetention(allPlanLimits[p]?.retention_days ?? 0)],
+                ] as [string, (p: string) => string][]).map(([label, fn]) => (
+                  <tr key={label}>
+                    <td>{label}</td>
+                    {PLAN_NAMES.map((p) => (
+                      <td key={p} className={p === user.plan ? "plan-active" : ""}>{fn(p)}</td>
+                    ))}
+                  </tr>
                 ))}
-              </tr>
-            ))}
-            <tr>
-              <td />
-              {PLAN_NAMES.map((p) => (
-                <td key={p} className={p === user.plan ? "plan-active" : ""}>
-                  {p === user.plan ? (
-                    <span className="badge badge-ok">Current</span>
-                  ) : p === "starter" ? (
-                    user.plan !== "starter" ? (
-                      <button className="btn small" onClick={handleManageSubscription} disabled={loading !== null}>
-                        {loading === "portal" ? "..." : "Manage"}
-                      </button>
-                    ) : null
-                  ) : (
-                    PLAN_NAMES.indexOf(p) > PLAN_NAMES.indexOf(user.plan as typeof PLAN_NAMES[number]) ? (
-                      <button
-                        className="btn small primary"
-                        onClick={() => handleUpgrade(p)}
-                        disabled={loading !== null}
-                      >
-                        {loading === p ? "..." : "Upgrade"}
-                      </button>
-                    ) : (
-                      <button className="btn small" onClick={handleManageSubscription} disabled={loading !== null}>
-                        {loading === "portal" ? "..." : "Manage"}
-                      </button>
-                    )
-                  )}
-                </td>
-              ))}
-            </tr>
-          </tbody>
-        </table>
+                <tr>
+                  <td />
+                  {PLAN_NAMES.map((p) => (
+                    <td key={p} className={p === user.plan ? "plan-active" : ""}>
+                      {p === user.plan ? (
+                        <span className="badge badge-ok">Current</span>
+                      ) : p === "starter" ? (
+                        user.plan !== "starter" ? (
+                          <button className="btn small" onClick={handleManageSubscription} disabled={loading !== null}>
+                            {loading === "portal" ? "..." : "Manage"}
+                          </button>
+                        ) : null
+                      ) : (
+                        PLAN_NAMES.indexOf(p) > PLAN_NAMES.indexOf(user.plan as typeof PLAN_NAMES[number]) ? (
+                          <button
+                            className="btn small primary"
+                            onClick={() => handleUpgrade(p)}
+                            disabled={loading !== null}
+                          >
+                            {loading === p ? "..." : "Upgrade"}
+                          </button>
+                        ) : (
+                          <button className="btn small" onClick={handleManageSubscription} disabled={loading !== null}>
+                            {loading === "portal" ? "..." : "Manage"}
+                          </button>
+                        )
+                      )}
+                    </td>
+                  ))}
+                </tr>
+              </tbody>
+            </table>
 
-        {user.plan !== "starter" && (
-          <div className="setting-row">
-            <button className="btn small" onClick={handleManageSubscription} disabled={loading !== null}>
-              {loading === "portal" ? "..." : "Manage subscription"}
-            </button>
-            <button className="btn small" onClick={handleRefreshPlan}>
-              Refresh plan
-            </button>
-          </div>
+            {user.plan !== "starter" && (
+              <div className="setting-row">
+                <button className="btn small" onClick={handleManageSubscription} disabled={loading !== null}>
+                  {loading === "portal" ? "..." : "Manage subscription"}
+                </button>
+                <button className="btn small" onClick={handleRefreshPlan}>
+                  Refresh plan
+                </button>
+              </div>
+            )}
+          </>
         )}
 
         <div className="setting-row">

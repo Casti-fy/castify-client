@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   User,
   Feed,
+  PlanLimits,
   AuthResponse,
   CreateFeedResponse,
   FeedDetailResponse,
@@ -17,6 +18,9 @@ export const register = (email: string, password: string) =>
 export const checkAuth = () => invoke<User>("check_auth");
 
 export const logout = () => invoke<void>("logout");
+
+export const fetchPlans = () =>
+  invoke<Record<string, PlanLimits>>("fetch_plans");
 
 // Feeds
 export const listFeeds = () => invoke<Feed[]>("list_feeds");
@@ -42,10 +46,10 @@ export const deleteFeed = (feedId: string) =>
 export const syncFeed = (feedId: string) =>
   invoke<void>("sync_feed", { feedId });
 
-export const startPeriodicSync = (intervalMinutes: number) =>
-  invoke<void>("start_periodic_sync", { intervalMinutes });
+export const getSyncInterval = () => invoke<number>("get_sync_interval");
 
-export const stopPeriodicSync = () => invoke<void>("stop_periodic_sync");
+export const setSyncInterval = (minutes: number) =>
+  invoke<void>("set_sync_interval", { minutes });
 
 // Billing
 export const createCheckout = (plan: string, interval: "month" | "year") =>

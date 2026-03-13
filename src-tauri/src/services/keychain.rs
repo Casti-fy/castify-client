@@ -5,7 +5,6 @@ use crate::error::AppError;
 
 const STORE_FILE: &str = "credentials.json";
 const TOKEN_KEY: &str = "jwt_token";
-const SERVER_URL_KEY: &str = "server_url";
 
 pub fn save_token(app: &AppHandle, token: &str) -> Result<(), AppError> {
     let store = app
@@ -35,25 +34,6 @@ pub fn delete_token(app: &AppHandle) -> Result<(), AppError> {
         .store(STORE_FILE)
         .map_err(|e| AppError::Keychain(e.to_string()))?;
     store.delete(TOKEN_KEY);
-    store
-        .save()
-        .map_err(|e| AppError::Keychain(e.to_string()))
-}
-
-pub fn get_server_url(app: &AppHandle) -> Result<Option<String>, AppError> {
-    let store = app
-        .store(STORE_FILE)
-        .map_err(|e| AppError::Keychain(e.to_string()))?;
-    Ok(store
-        .get(SERVER_URL_KEY)
-        .and_then(|v| v.as_str().map(String::from)))
-}
-
-pub fn set_server_url(app: &AppHandle, url: &str) -> Result<(), AppError> {
-    let store = app
-        .store(STORE_FILE)
-        .map_err(|e| AppError::Keychain(e.to_string()))?;
-    store.set(SERVER_URL_KEY, serde_json::json!(url));
     store
         .save()
         .map_err(|e| AppError::Keychain(e.to_string()))

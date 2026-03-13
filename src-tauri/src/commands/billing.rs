@@ -1,42 +1,18 @@
-use serde::Deserialize;
-use tauri::State;
+use tauri::AppHandle;
 
 use crate::error::AppError;
-use crate::state::AppState;
-
-#[derive(Debug, Deserialize)]
-struct CheckoutResponse {
-    checkout_url: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct PortalResponse {
-    portal_url: String,
-}
+use crate::services::billing as billing_service;
 
 #[tauri::command]
 pub async fn create_checkout(
-    state: State<'_, AppState>,
+    app: AppHandle,
     plan: String,
     interval: String,
 ) -> Result<String, AppError> {
-    let body = serde_json::json!({ "plan": plan, "interval": interval });
-    let resp: CheckoutResponse = state
-        .api
-        .read()
-        .await
-        .request_with_body("/api/v1/billing/checkout", "POST", Some(&body), true)
-        .await?;
-    Ok(resp.checkout_url)
+    billing_service::create_checkout(&app, plan, interval).await
 }
 
 #[tauri::command]
-pub async fn create_portal(state: State<'_, AppState>) -> Result<String, AppError> {
-    let resp: PortalResponse = state
-        .api
-        .read()
-        .await
-        .request("/api/v1/billing/portal", "POST", true)
-        .await?;
-    Ok(resp.portal_url)
+pub async fn create_portal(app: AppHandle) -> Result<String, AppError> {
+    billing_service::create_portal(&app).await
 }

@@ -5,6 +5,7 @@ pub mod episode;
 pub mod extractor;
 pub mod feeds;
 pub mod keychain;
+pub mod helpers;
 mod sync_download;
 mod sync_scan;
 mod sync_upload;

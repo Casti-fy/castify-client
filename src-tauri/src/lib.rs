@@ -90,6 +90,7 @@ pub fn run() {
             commands::sync::sync_feed,
             commands::sync::get_sync_interval,
             commands::sync::set_sync_interval,
+            commands::sync::clear_sync_cache,
             commands::billing::create_checkout,
             commands::billing::create_portal,
         ])

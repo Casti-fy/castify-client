@@ -1,28 +1,16 @@
 use std::collections::HashSet;
 use std::time::Duration;
 
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 
 use crate::error::AppError;
 use crate::models::{CreateEpisodeRequest, Feed, PlaylistEntry};
-use crate::services::{episode as episode_service, extractor, feeds as feeds_service};
+use crate::services::{episode as episode_service, extractor, feeds as feeds_service, helpers};
 use crate::state::{AppState, Job, Priority};
 
 const SCAN_FEED_SPACING: Duration = Duration::from_secs(2);
 
-fn emit_progress(app: &AppHandle, feed_id: &str, feed_name: &str, step: &str, message: &str) {
-    let _ = app.emit(
-        "sync-progress",
-        crate::models::SyncProgressEvent {
-            feed_id: feed_id.to_string(),
-            feed_name: feed_name.to_string(),
-            step: step.to_string(),
-            message: message.to_string(),
-        },
-    );
-}
-
-fn format_pub_date(upload_date: Option<&str>, timestamp: Option<i64>) -> Option<String> {
+pub fn format_pub_date(upload_date: Option<&str>, timestamp: Option<i64>) -> Option<String> {
     fn epoch_days_to_ymd(days: i32) -> (i32, u32, u32) {
         let z = days + 719468;
         let era = (if z >= 0 { z } else { z - 146096 }) / 146097;
@@ -71,7 +59,7 @@ async fn scan_feed(
     max_items: u32,
     priority: Priority,
 ) -> Result<(), AppError> {
-    emit_progress(app, &feed.id, &feed.name, "fetch", "Fetching playlist...");
+    helpers::emit_progress(app, &feed.id, &feed.name, "fetch", "Fetching playlist...");
 
     let detail = feeds_service::fetch_feed_detail(app, &feed.id).await?;
 
@@ -85,7 +73,7 @@ async fn scan_feed(
         .collect();
 
     if new_entries.is_empty() {
-        emit_progress(app, &feed.id, &feed.name, "done", "Already up to date");
+        helpers::emit_progress(app, &feed.id, &feed.name, "done", "Already up to date");
         return Ok(());
     }
 
@@ -96,7 +84,7 @@ async fn scan_feed(
         };
         let title = entry.title.clone().unwrap_or_else(|| video_id.clone());
 
-        emit_progress(
+        helpers::emit_progress(
             app,
             &feed.id,
             &feed.name,
@@ -115,11 +103,20 @@ async fn scan_feed(
         match episode_service::create_episode(app, &feed.id, &create_body).await {
             Ok(resp) => {
                 let state = app.state::<AppState>();
+                let episode_id = resp.episode.id;
+                let episode_title = resp.episode.title.clone();
+                let video_id = resp.episode.video_id.clone();
+                let episode_url = extractor::episode_url(&feed.source_url, &video_id);
+
                 state
                     .sync_channels
                     .send_download(Job {
                         feed_id: feed.id.clone(),
-                        episode_id: resp.episode.id,
+                        feed_name: feed.name.clone(),
+                        episode_id,
+                        episode_title,
+                        video_id,
+                        episode_url,
                         priority,
                     })
                     .await;
@@ -130,7 +127,7 @@ async fn scan_feed(
         }
     }
 
-    emit_progress(
+    helpers::emit_progress(
         app,
         &feed.id,
         &feed.name,

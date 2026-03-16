@@ -15,7 +15,11 @@ pub enum Priority {
 #[derive(Debug, Clone)]
 pub struct Job {
     pub feed_id: String,
+    pub feed_name: String,
     pub episode_id: String,
+    pub episode_title: String,
+    pub video_id: String,
+    pub episode_url: String,
     pub priority: Priority,
 }
 

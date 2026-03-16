@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
-import type { Feed, User } from "../lib/types";
+import type { Feed, SyncProgressEvent, User } from "../lib/types";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
+import { useTauriListener } from "../hooks/useTauriListener";
 import * as api from "../lib/api";
 
 interface Props {
@@ -25,6 +26,13 @@ export default function FeedsList({ user, onSelectFeed, onAccount, syncStatus }:
 
   useEffect(() => {
     load();
+  }, [load]);
+
+  // Refresh feed list when any episode completes (episode_count may change)
+  useTauriListener<SyncProgressEvent>("sync-progress", (event) => {
+    if (event.payload.step === "complete") {
+      load();
+    }
   }, [load]);
 
   const handleDelete = async (feed: Feed) => {

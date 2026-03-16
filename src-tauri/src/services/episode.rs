@@ -1,7 +1,7 @@
 use tauri::{AppHandle, Manager};
 
 use crate::error::AppError;
-use crate::models::{CreateEpisodeRequest, CreateEpisodeResponse, UpdateEpisodeRequest, UploadURLResponse};
+use crate::models::{CreateEpisodeRequest, CreateEpisodeResponse, UpdateEpisodeMetadataRequest, UpdateEpisodeRequest, UploadURLResponse};
 use crate::state::AppState;
 
 pub async fn create_episode(
@@ -36,6 +36,22 @@ pub async fn update_status(
         &format!("/api/v1/episodes/{episode_id}"),
         "PATCH",
         Some(&body),
+        true,
+    )
+    .await
+}
+
+pub async fn update_metadata(
+    app: &AppHandle,
+    episode_id: &str,
+    body: &UpdateEpisodeMetadataRequest,
+) -> Result<(), AppError> {
+    let state = app.state::<AppState>();
+    let api = state.api.read().await;
+    api.request_no_content(
+        &format!("/api/v1/episodes/{episode_id}"),
+        "PATCH",
+        Some(body),
         true,
     )
     .await

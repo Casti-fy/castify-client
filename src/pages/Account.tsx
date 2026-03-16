@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { open } from "@tauri-apps/plugin-shell";
+import { invoke } from "@tauri-apps/api/core";
 import { isEnabled, enable, disable } from "@tauri-apps/plugin-autostart";
 import type { User, PlanLimits } from "../lib/types";
 import * as api from "../lib/api";
@@ -45,8 +46,6 @@ const INTERVALS = [
   { label: "120 min", value: 120 },
 ];
 
-const STARTER_ONLY_INTERVAL = 120;
-
 function fmtLimit(v: number) { return v < 0 ? "\u221E" : String(v); }
 function fmtRetention(d: number) { return d < 0 ? "Forever" : `${d}d`; }
 
@@ -64,16 +63,7 @@ export default function Account({ user, onBack, onLogout, onUserUpdate }: Props)
     api.fetchPlans().then(setAllPlanLimits).catch(() => {});
   }, []);
 
-  // Starter plan: only 120 min allowed; force interval to 120
-  useEffect(() => {
-    if (user.plan === "starter" && syncInterval !== STARTER_ONLY_INTERVAL) {
-      setSyncInterval(STARTER_ONLY_INTERVAL);
-      api.setSyncInterval(STARTER_ONLY_INTERVAL).catch(console.error);
-    }
-  }, [user.plan]);
-
   const handleSyncIntervalChange = (value: number) => {
-    if (user.plan === "starter" && value !== STARTER_ONLY_INTERVAL) return;
     setSyncInterval(value);
     api.setSyncInterval(value).catch(console.error);
   };
@@ -123,6 +113,14 @@ export default function Account({ user, onBack, onLogout, onUserUpdate }: Props)
       setLaunchAtStartup(checked);
     } catch (e) {
       console.error("Launch at startup error:", e);
+    }
+  };
+
+  const handleClearCache = async () => {
+    try {
+      await invoke("clear_sync_cache");
+    } catch (e) {
+      console.error("Clear cache error:", e);
     }
   };
 
@@ -249,18 +247,23 @@ export default function Account({ user, onBack, onLogout, onUserUpdate }: Props)
             onChange={(e) => handleSyncIntervalChange(Number(e.target.value))}
           >
             {INTERVALS.map((opt) => {
-              const starterLocked = user.plan === "starter" && opt.value !== STARTER_ONLY_INTERVAL;
               return (
                 <option
                   key={opt.value}
                   value={opt.value}
-                  disabled={starterLocked}
                 >
-                  {opt.label}{starterLocked ? " (Upgrade)" : ""}
+                  {opt.label}
                 </option>
               );
             })}
           </select>
+        </div>
+
+        <div className="setting-row">
+          <label>Downloaded audio cache</label>
+          <button className="btn small" onClick={handleClearCache}>
+            Clear cache
+          </button>
         </div>
       </div>
     </div>

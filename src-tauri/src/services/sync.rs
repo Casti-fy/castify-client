@@ -3,15 +3,17 @@ use std::time::Duration;
 use tauri::{AppHandle, Manager};
 
 use crate::error::AppError;
-use crate::models::{Feed, PlanLimits};
+use crate::models::Feed;
+use crate::services::{extractor, feeds as feeds_service};
 use crate::state::{AppState, Job, Priority};
 
 use super::{sync_download, sync_scan, sync_upload};
 
+
 /// Push a feed's not-ready episodes to channels with the given priority.
 pub async fn push_feed_episodes(app: &AppHandle, feed_id: &str, priority: Priority) {
     let state = app.state::<AppState>();
-    let detail = match super::feeds::fetch_feed_detail(app, feed_id).await {
+    let detail = match feeds_service::fetch_feed_detail(app, feed_id).await {
         Ok(d) => d,
         Err(e) => {
             log::warn!("Failed to fetch feed detail for push: {e}");
@@ -21,21 +23,33 @@ pub async fn push_feed_episodes(app: &AppHandle, feed_id: &str, priority: Priori
     for ep in &detail.episodes {
         match ep.status.as_str() {
             "pending" | "failed" => {
+                let episode_url =
+                    extractor::episode_url(&detail.feed.source_url, &ep.video_id);
                 state
                     .sync_channels
                     .send_download(Job {
                         feed_id: feed_id.to_string(),
+                        feed_name: detail.feed.name.clone(),
                         episode_id: ep.id.clone(),
+                        episode_title: ep.title.clone(),
+                        video_id: ep.video_id.clone(),
+                        episode_url,
                         priority,
                     })
                     .await;
             }
             "uploading" => {
+                let episode_url =
+                    extractor::episode_url(&detail.feed.source_url, &ep.video_id);
                 state
                     .sync_channels
                     .send_upload(Job {
                         feed_id: feed_id.to_string(),
+                        feed_name: detail.feed.name.clone(),
                         episode_id: ep.id.clone(),
+                        episode_title: ep.title.clone(),
+                        video_id: ep.video_id.clone(),
+                        episode_url,
                         priority,
                     })
                     .await;
@@ -69,51 +83,6 @@ pub async fn run_sync_for_feeds(
 ) -> Result<(), AppError> {
     sync_scan::run_scan(app, feeds, max_scan_items, priority).await;
     Ok(())
-}
-
-// ----- Plan helpers -----
-
-pub async fn get_user_limits(app: &AppHandle) -> Option<PlanLimits> {
-    let state = app.state::<AppState>();
-    let result = {
-        let api = state.api.read().await;
-        api.request::<crate::models::User>("/api/v1/auth/me", "GET", true)
-            .await
-    };
-    match result {
-        Ok(user) => Some(user.limits),
-        Err(_) => None,
-    }
-}
-
-pub fn cap_feeds_for_limits(feeds: Vec<Feed>, limits: &PlanLimits) -> Vec<Feed> {
-    if limits.max_feeds < 0 {
-        feeds
-    } else {
-        let max = limits.max_feeds as usize;
-        if feeds.len() > max {
-            feeds.into_iter().take(max).collect()
-        } else {
-            feeds
-        }
-    }
-}
-
-pub async fn fetch_capped_feeds(app: &AppHandle, label: &str) -> Option<Vec<Feed>> {
-    let feeds = match super::feeds::fetch_all_feeds(app).await {
-        Ok(f) => f,
-        Err(e) => {
-            log::warn!("{label}: failed to fetch feeds: {e}");
-            return None;
-        }
-    };
-    match get_user_limits(app).await {
-        Some(limits) => Some(cap_feeds_for_limits(feeds, &limits)),
-        None => {
-            log::warn!("{label}: failed to fetch user limits");
-            Some(feeds)
-        }
-    }
 }
 
 // ----- Settings helpers -----
@@ -161,9 +130,12 @@ pub async fn start_periodic_sync(app: &AppHandle) -> Result<(), AppError> {
                 }
             }
 
-            let feeds = match fetch_capped_feeds(&app_scan, "Periodic scan").await {
-                Some(f) => f,
-                None => continue,
+            let feeds: Vec<Feed> = match feeds_service::fetch_all_feeds(&app_scan).await {
+                Ok(f) => f,
+                Err(e) => {
+                    log::warn!("Failed to fetch feeds: {e}");
+                    continue;
+                }
             };
             let _ = run_sync_for_feeds(&app_scan, &feeds, 5, Priority::High).await;
             last_scan = Some(tokio::time::Instant::now());
@@ -213,16 +185,18 @@ pub async fn auto_start_sync(app: &AppHandle) {
 
 /// Fetch all not-ready episodes and push them to channels as Normal priority.
 async fn startup_recovery(app: &AppHandle) {
-    let feeds = match fetch_capped_feeds(app, "Startup recovery").await {
-        Some(f) => f,
-        None => return,
+    let feeds = match feeds_service::fetch_all_feeds(app).await {
+        Ok(f) => f,
+        Err(e) => {
+            log::warn!("Failed to fetch feeds: {e}");
+            return;
+        }
     };
 
     for feed in &feeds {
         push_feed_episodes(app, &feed.id, Priority::Normal).await;
     }
 
-    log::info!("Startup recovery: enqueued incomplete episodes from {} feeds", feeds.len());
 }
 
 pub async fn stop_periodic_sync(app: AppHandle) -> Result<(), AppError> {

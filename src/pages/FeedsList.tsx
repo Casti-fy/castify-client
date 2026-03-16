@@ -1,17 +1,16 @@
 import { useState, useEffect, useCallback } from "react";
-import type { Feed, SyncProgressEvent, User } from "../lib/types";
+import type { Feed, SyncProgressEvent } from "../lib/types";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useTauriListener } from "../hooks/useTauriListener";
 import * as api from "../lib/api";
 
 interface Props {
-  user: User;
   onSelectFeed: (feedId: string) => void;
   onAccount: () => void;
   syncStatus: string;
 }
 
-export default function FeedsList({ user, onSelectFeed, onAccount, syncStatus }: Props) {
+export default function FeedsList({ onSelectFeed, onAccount, syncStatus }: Props) {
   const [feeds, setFeeds] = useState<Feed[]>([]);
   const [showAdd, setShowAdd] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);

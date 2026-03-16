@@ -63,7 +63,6 @@ export default function App() {
     <div className="app">
       {page.name === "feeds" && (
         <FeedsList
-          user={user}
           onSelectFeed={(id) => setPage({ name: "feed-detail", feedId: id })}
           onAccount={() => setPage({ name: "account" })}
           syncStatus={syncStatus}

@@ -6,22 +6,16 @@ use rand::Rng;
 use tauri::{AppHandle, Manager};
 
 use crate::error::AppError;
-use crate::services::{
-    episode as episode_service, extractor, helpers,
-};
+use crate::services::{episode as episode_service, extractor, helpers};
 use crate::state::{AppState, ChannelReceivers, Job, Priority};
 
 const SEEN_CAP: usize = 1000;
-
-fn temp_dir_for_feed(feed_id: &str) -> std::path::PathBuf {
-    std::env::temp_dir().join(format!("castify-{feed_id}"))
-}
 
 async fn process_download(app: &AppHandle, job: Job) -> Result<(), AppError> {
     let feed_id = &job.feed_id;
     let episode_id = &job.episode_id;
 
-    let temp_dir = temp_dir_for_feed(feed_id);
+    let temp_dir = helpers::temp_dir_for_feed(feed_id);
     if let Err(e) = tokio::fs::create_dir_all(&temp_dir).await {
         log::warn!("Failed to create temp dir: {e}");
         return Ok(());

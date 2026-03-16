@@ -11,15 +11,11 @@ use crate::state::{ChannelReceivers, Job};
 
 const SEEN_CAP: usize = 1000;
 
-fn temp_dir_for_feed(feed_id: &str) -> std::path::PathBuf {
-    std::env::temp_dir().join(format!("castify-{feed_id}"))
-}
-
 async fn process_upload(app: &AppHandle, job: Job) -> Result<(), AppError> {
     let feed_id = &job.feed_id;
     let episode_id = &job.episode_id;
 
-    let temp_dir = temp_dir_for_feed(feed_id);
+    let temp_dir = helpers::temp_dir_for_feed(feed_id);
     let audio_path = temp_dir.join(format!("{}.m4a", job.video_id));
 
     if !audio_path.exists() {

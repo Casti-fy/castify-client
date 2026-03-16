@@ -161,7 +161,7 @@ jobs:
       - name: Create release on castify-web
         uses: softprops/action-gh-release@v2
         with:
-          repository: Apollo-Audio/castify-web
+          repository: Casti-fy/castify-web
           tag_name: ${{ github.ref_name }}
           name: Castify ${{ github.ref_name }}
           draft: true

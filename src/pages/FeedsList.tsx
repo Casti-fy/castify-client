@@ -17,9 +17,6 @@ export default function FeedsList({ user, onSelectFeed, onAccount, syncStatus }:
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const { copiedId, copy } = useCopyToClipboard();
 
-  const limits = user.limits;
-  const atFeedLimit = limits.max_feeds >= 0 && feeds.length >= limits.max_feeds;
-
   const load = useCallback(() => {
     api.listFeeds().then(setFeeds).catch(console.error);
   }, []);
@@ -48,13 +45,11 @@ export default function FeedsList({ user, onSelectFeed, onAccount, syncStatus }:
   return (
     <div className="page">
       <header className="toolbar">
-        <h2>Feeds ({feeds.length}{limits.max_feeds >= 0 ? `/${limits.max_feeds}` : ""})</h2>
+        <h2>Feeds ({feeds.length})</h2>
         <div className="toolbar-actions">
           <button
             className="btn"
             onClick={() => setShowAdd(true)}
-            disabled={atFeedLimit}
-            title={atFeedLimit ? `Feed limit reached (${limits.max_feeds}). Upgrade your plan.` : undefined}
           >
             + Add Feed
           </button>
@@ -63,13 +58,6 @@ export default function FeedsList({ user, onSelectFeed, onAccount, syncStatus }:
           </button>
         </div>
       </header>
-
-      {atFeedLimit && (
-        <div className="plan-banner">
-          You've reached the {user.plan} plan limit of {limits.max_feeds} feed{limits.max_feeds > 1 ? "s" : ""}.
-          Upgrade for more.
-        </div>
-      )}
 
       {syncStatus && <div className="sync-status">{syncStatus}</div>}
 

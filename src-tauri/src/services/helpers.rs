@@ -23,3 +23,7 @@ pub fn emit_progress(
         },
     );
 }
+
+pub fn temp_dir_for_feed(feed_id: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("castify-{feed_id}"))
+}

@@ -187,12 +187,12 @@ if [ "$BUILD_FFMPEG" = true ]; then
         BUILD_DIR="$(mktemp -d)"
         trap 'rm -rf "$BUILD_DIR"' EXIT
 
-        FFMPEG_URL="https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz"
-        curl -L --fail --progress-bar -o "$BUILD_DIR/ffmpeg.tar.xz" "$FFMPEG_URL"
+        FFMPEG_URL="https://github.com/FFmpeg/FFmpeg/archive/refs/tags/n${FFMPEG_VERSION}.tar.gz"
+        curl -L --fail --progress-bar -o "$BUILD_DIR/ffmpeg.tar.gz" "$FFMPEG_URL"
 
         echo "==> Extracting source..."
-        tar xf "$BUILD_DIR/ffmpeg.tar.xz" -C "$BUILD_DIR"
-        SRC_DIR="$BUILD_DIR/ffmpeg-${FFMPEG_VERSION}"
+        tar xf "$BUILD_DIR/ffmpeg.tar.gz" -C "$BUILD_DIR"
+        SRC_DIR="$BUILD_DIR/FFmpeg-n${FFMPEG_VERSION}"
 
         # Minimal config: YouTube audio extraction -> M4A (AAC)
         # Only enable codecs needed for yt-dlp audio post-processing

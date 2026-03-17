@@ -165,6 +165,7 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: Castify ${{ github.ref_name }}
           draft: true
+          token: ${{ secrets.RELEASE_TOKEN }}
           files: |
             artifacts/**/*.dmg
             artifacts/**/*.exe
@@ -182,6 +183,3 @@ jobs:
             | macOS (Intel) | `.dmg` (x64) |
             | Windows 10+ | `.exe` (NSIS installer) |
             | Linux | `.deb` or `.AppImage` |
-
-        env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}

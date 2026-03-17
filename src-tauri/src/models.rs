@@ -159,12 +159,34 @@ pub struct ErrorResponse {
 // Typed scaffold, schema for JSON dictionary comming from yt-dlp
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlaylistEntry {
+    pub url: Option<String>,
     pub id: Option<String>,
     pub title: Option<String>,
-    pub upload_date: Option<String>,
     pub timestamp: Option<i64>, // sound cloud
+    pub release_timestamp: Option<i64>, // youtube, premier
+    pub live_status: Option<String>, // youtube, live
+    pub availability: Option<String>, // youtube, subscriber_only, needs_premium
     pub duration: Option<f64>,
     pub description: Option<String>,
+    pub extractor: Option<String>,
+}
+
+impl PlaylistEntry {
+    pub fn pub_date(&self) -> Option<String> {
+        // Choose source-specific timestamp (YouTube: release_timestamp, SoundCloud: timestamp)
+        let ts = if self.extractor.as_deref() == Some("youtube") {
+            self.release_timestamp
+        } else if self.extractor.as_deref() == Some("soundcloud") {
+            self.timestamp
+        } else {
+            None
+        }?;
+
+        // Derive UTC datetime from Unix timestamp using chrono
+        use chrono::{TimeZone, Utc};
+        let dt = Utc.timestamp_opt(ts, 0).single()?;
+        Some(dt.format("%Y-%m-%dT%H:%M:%SZ").to_string())
+    }
 }
 
 // -- Event payloads --

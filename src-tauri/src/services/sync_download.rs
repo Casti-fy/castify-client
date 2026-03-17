@@ -81,6 +81,18 @@ pub async fn start_download_worker(app: AppHandle, mut channels: ChannelReceiver
             }
         };
 
+        // Skip jobs for feeds that have been deleted.
+        if app
+            .app_handle()
+            .state::<AppState>()
+            .cancelled_feeds
+            .read()
+            .await
+            .contains(&job.feed_id)
+        {
+            continue;
+        }
+
         if !seen.insert(job.episode_id.clone()) {
             continue;
         }

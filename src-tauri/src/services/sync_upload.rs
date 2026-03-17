@@ -2,12 +2,12 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
 use crate::error::AppError;
 use crate::models::UploadURLResponse;
 use crate::services::{episode as episode_service, helpers, uploader};
-use crate::state::{ChannelReceivers, Job};
+use crate::state::{AppState, ChannelReceivers, Job};
 
 const SEEN_CAP: usize = 1000;
 
@@ -94,6 +94,19 @@ pub async fn start_upload_worker(app: AppHandle, mut channels: ChannelReceivers)
                 continue;
             }
         };
+
+        // Skip jobs for feeds that have been deleted.
+        {
+            let state = app.state::<AppState>();
+            if state
+                .cancelled_feeds
+                .read()
+                .await
+                .contains(&job.feed_id)
+            {
+                continue;
+            }
+        }
 
         if !seen.insert(job.episode_id.clone()) {
             continue;

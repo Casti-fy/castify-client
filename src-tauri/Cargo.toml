@@ -37,6 +37,7 @@ sha1 = "0.10"
 thiserror = "2"
 log = "0.4"
 rand = "0.8"
+chrono = { version = "0.4", features = ["clock"] }
 # CLI only (not in desktop bundle)
 clap = { version = "4", features = ["derive"], optional = true }
 dirs = { version = "5", optional = true }

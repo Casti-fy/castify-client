@@ -76,18 +76,11 @@ pub async fn fetch_playlist(
     url: &str,
     max_items: u32,
 ) -> Result<Vec<PlaylistEntry>, AppError> {
-    let is_soundcloud = url.contains("soundcloud.com");
+    // yt-dlp --flat-playlist --dump-json --playlist-end 10 https://www.youtube.com/@TuanTienTi2911
+    // yt-dlp --flat-playlist --dump-json --playlist-end 10 https://www.youtube.com/@dinhcuhanoi # likely have premier
+    // yt-dlp --flat-playlist --dump-json --playlist-end 10 https://www.youtube.com/@VTCNewstintuc # likely have live
 
     let mut args = vec!["--ignore-errors".to_string()];
-
-    if !is_soundcloud {
-        // YouTube: flat-playlist is fast, metadata fetched later in pass 2
-        args.push("--flat-playlist".to_string());
-        args.extend([
-            "--match-filter".to_string(),
-            "original_url!*=/shorts/ & live_status!=is_upcoming & live_status!=is_live & availability!=subscriber_only & availability!=needs_premium".to_string(),
-        ]);
-    }
 
     args.extend([
         "--dump-json".to_string(),
@@ -104,7 +97,14 @@ pub async fn fetch_playlist(
         )));
     }
 
-    let entries: Vec<PlaylistEntry> = parse_playlist_lines(&stdout);
+    let mut entries: Vec<PlaylistEntry> = parse_playlist_lines(&stdout);
+    // filter out YouTube Shorts, live streams, and non-public availability
+    entries.retain(|entry| {
+        !entry.url.as_deref().unwrap_or("").contains("/shorts/")
+            && entry.live_status.as_deref() != Some("is_live")
+            && entry.availability.as_deref().map(|a| a == "public").unwrap_or(true)
+    });
+
     log::info!("[fetch_playlist] got {} entries", entries.len());
     Ok(entries)
 }
@@ -125,6 +125,7 @@ pub async fn fetch_video_metadata(
     app: &AppHandle,
     url: &str,
 ) -> Result<PlaylistEntry, AppError> {
+    // yt-dlp --dump-json --skip-download --no-playlist https://www.youtube.com/watch?v=TjUhXbGdLYo
     let args = vec![
         "--ignore-errors".to_string(),
         "--dump-json".to_string(),
@@ -185,7 +186,10 @@ pub async fn fetch_channel_artwork_url(
     let artwork_url = json
         .get("thumbnails")
         .and_then(|t| t.as_array())
-        .and_then(|arr| arr.first())
+        .and_then(|arr| {
+            arr.iter()
+                .find(|t| t.get("id").and_then(|id| id.as_str()) == Some("avatar_uncropped"))
+        })
         .and_then(|t| t.get("url"))
         .and_then(|u| u.as_str())
         .map(|s| s.to_string());

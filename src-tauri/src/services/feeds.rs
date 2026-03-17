@@ -73,5 +73,13 @@ pub async fn delete_feed(app: &AppHandle, feed_id: &str) -> Result<(), AppError>
     let state = app.state::<AppState>();
     let api = state.api.read().await;
     api.request_no_content::<()>(&format!("/api/v1/feeds/{feed_id}"), "DELETE", None, true)
-        .await
+        .await?;
+
+    // Mark this feed as cancelled so workers skip any pending jobs for it.
+    {
+        let mut cancelled = state.cancelled_feeds.write().await;
+        cancelled.insert(feed_id.to_string());
+    }
+
+    Ok(())
 }

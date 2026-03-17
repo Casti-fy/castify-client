@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex, RwLock};
 
@@ -132,6 +133,7 @@ pub struct AppState {
     pub api: Arc<RwLock<ApiClient>>,
     pub sync_handles: Arc<Mutex<SyncHandles>>,
     pub sync_channels: Arc<SyncChannels>,
+    pub cancelled_feeds: Arc<RwLock<HashSet<String>>>,
     pub cached_limits: Arc<RwLock<Option<crate::models::PlanLimits>>>,
 }
 
@@ -145,6 +147,7 @@ impl AppState {
                 upload: None,
             })),
             sync_channels: Arc::new(SyncChannels::new()),
+            cancelled_feeds: Arc::new(RwLock::new(HashSet::new())),
             cached_limits: Arc::new(RwLock::new(None)),
         }
     }

@@ -10,38 +10,6 @@ use crate::state::{AppState, Job, Priority};
 
 const SCAN_FEED_SPACING: Duration = Duration::from_secs(2);
 
-pub fn format_pub_date(upload_date: Option<&str>, timestamp: Option<i64>) -> Option<String> {
-    fn epoch_days_to_ymd(days: i32) -> (i32, u32, u32) {
-        let z = days + 719468;
-        let era = (if z >= 0 { z } else { z - 146096 }) / 146097;
-        let doe = (z - era * 146097) as u32;
-        let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-        let y = yoe as i32 + era * 400;
-        let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-        let mp = (5 * doy + 2) / 153;
-        let d = doy - (153 * mp + 2) / 5 + 1;
-        let m = if mp < 10 { mp + 3 } else { mp - 9 };
-        (if m <= 2 { y + 1 } else { y }, m, d)
-    }
-
-    if let Some(d) = upload_date {
-        if d.len() == 8 {
-            return Some(format!(
-                "{}-{}-{}T00:00:00Z",
-                &d[..4],
-                &d[4..6],
-                &d[6..8]
-            ));
-        }
-    }
-    timestamp.and_then(|ts| {
-        let days_since_epoch = (ts / 86400) as i32;
-        let date = epoch_days_to_ymd(days_since_epoch);
-        let s = format!("{:04}{:02}{:02}", date.0, date.1, date.2);
-        format_pub_date(Some(&s), None)
-    })
-}
-
 pub async fn run_scan(app: &AppHandle, feeds: &[Feed], max_items: u32, priority: Priority) {
     for (i, feed) in feeds.iter().enumerate() {
         if i > 0 {
@@ -96,7 +64,7 @@ async fn scan_feed(
             video_id,
             title: title.clone(),
             description: entry.description.clone(),
-            pub_date: format_pub_date(entry.upload_date.as_deref(), entry.timestamp),
+            pub_date: entry.pub_date(),
             duration_sec: entry.duration.map(|d| d as i64),
         };
 

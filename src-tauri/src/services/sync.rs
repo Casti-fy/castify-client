@@ -60,18 +60,33 @@ pub async fn push_feed_episodes(app: &AppHandle, feed_id: &str, priority: Priori
 }
 
 /// Scan the first N episodes of a feed and push not-ready ones as Urgent.
+/// Also fetches the channel artwork and updates the feed if found.
 pub async fn scan_new_feed(app: &AppHandle, feed: &Feed) {
+    // Fetch channel artwork in parallel with episode scan
+    let app_artwork = app.clone();
+    let feed_id = feed.id.clone();
+    let source_url = feed.source_url.clone();
+    let artwork_handle = tokio::spawn(async move {
+        match extractor::fetch_channel_artwork_url(&app_artwork, &source_url).await {
+            Ok(Some(url)) => {
+                if let Err(e) = feeds_service::update_feed_artwork(&app_artwork, &feed_id, &url).await {
+                    log::warn!("[scan_new_feed] failed to update artwork: {e}");
+                }
+            }
+            Ok(None) => log::info!("[scan_new_feed] no artwork found for feed {feed_id}"),
+            Err(e) => log::warn!("[scan_new_feed] failed to fetch artwork: {e}"),
+        }
+    });
+
     let feeds = [feed.clone()];
     let _ = run_sync_for_feeds(app, &feeds, 5, Priority::Urgent).await;
-    push_feed_episodes(app, &feed.id, Priority::Urgent).await;
+    let _ = artwork_handle.await;
 }
 
 /// Sync a single feed: scan for new episodes, then push any not-ready ones as Urgent.
 pub async fn sync_single_feed(app: &AppHandle, feed_id: &str) -> Result<(), AppError> {
-    let detail = super::feeds::fetch_feed_detail(app, feed_id).await?;
-    let feeds = vec![detail.feed];
-    run_sync_for_feeds(app, &feeds, 100, Priority::Urgent).await?;
     push_feed_episodes(app, feed_id, Priority::Urgent).await;
+    // run_sync_for_feeds(app, &feeds, 100, Priority::Urgent).await?;
     Ok(())
 }
 

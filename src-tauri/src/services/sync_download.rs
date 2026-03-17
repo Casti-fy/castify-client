@@ -43,7 +43,7 @@ async fn process_download(app: &AppHandle, job: Job) -> Result<(), AppError> {
         &format!("Downloading: {}", job.episode_title),
     );
 
-    match extractor::extract_audio(app, &ep_url, &job.video_id, &temp_dir).await {
+    match extractor::download_audio(app, &ep_url, &job.video_id, &temp_dir).await {
         Ok(_) => {
             let _ = episode_service::update_status(app, episode_id, "uploading", None).await;
 

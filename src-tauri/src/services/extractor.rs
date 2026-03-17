@@ -158,13 +158,58 @@ fn parse_playlist_lines(stdout: &str) -> Vec<PlaylistEntry> {
         .collect()
 }
 
-pub async fn extract_audio(
+pub async fn fetch_channel_artwork_url(
+    app: &AppHandle,
+    url: &str,
+) -> Result<Option<String>, AppError> {
+    // yt-dlp --flat-playlist --dump-single-json --playlist-items 0 https://www.youtube.com/@TuanTienTi2911
+    let args = vec![
+        "--flat-playlist".to_string(),
+        "--dump-single-json".to_string(),
+        "--playlist-items".to_string(),
+        "0".to_string(),
+        url.to_string(),
+    ];
+
+    let (code, stdout, stderr) = run_sidecar(app, "binaries/yt-dlp", args).await?;
+
+    if code != 0 {
+        log::warn!("[fetch_channel_artwork_url] yt-dlp exit code {code}: {stderr}");
+        return Ok(None);
+    }
+
+    // Parse the JSON and extract the highest-resolution thumbnail URL
+    let json: serde_json::Value = serde_json::from_str(stdout.trim())
+        .map_err(|e| AppError::Other(format!("parse channel json: {e}")))?;
+
+    let artwork_url = json
+        .get("thumbnails")
+        .and_then(|t| t.as_array())
+        .and_then(|arr| arr.first())
+        .and_then(|t| t.get("url"))
+        .and_then(|u| u.as_str())
+        .map(|s| s.to_string());
+
+    log::info!("[fetch_channel_artwork_url] artwork_url: {:?}", artwork_url);
+    Ok(artwork_url)
+}
+
+pub async fn download_audio(
     app: &AppHandle,
     url: &str,
     video_id: &str,
     output_dir: &Path,
 ) -> Result<PathBuf, AppError> {
-    let output_template = output_dir.join("%(id)s.%(ext)s");
+    // ~24MB per 1h podcast
+    // yt-dlp --no-playlist --retries 3 -x --audio-format m4a --audio-quality 0 -o "%(id)s.%(ext)s" https://www.youtube.com/watch?v=TjUhXbGdLYo
+    // yt-dlp --match-filter "live_status!=is_upcoming & live_status!=is_live" --no-playlist --retries 3 -x --audio-format m4a --audio-quality 0 -o "%(id)s.%(ext)s" https://www.youtube.com/watch?v=1oG0ru5S4Qw
+    // https://api.soundcloud.com/tracks/1212266641
+    // --ffmpeg-location "<resource_dir>/binaries" # system may not have
+    // --match-filter "live_status!=is_upcoming & live_status!=is_live" # youtube, need?
+    let audio_path = output_dir.join(format!("{video_id}.m4a"));
+    if audio_path.exists() {
+        return Ok(audio_path);
+    }
 
     // Build yt-dlp args
     let mut args: Vec<String> = Vec::new();
@@ -183,14 +228,14 @@ pub async fn extract_audio(
     args.push("--no-playlist".to_string());
 
     // YouTube-specific filter: skip premieres and live streams.
-    // SoundCloud doesn't have live_status, so this filter breaks on it.
-    if !url.contains("soundcloud.com") {
+    if url.contains("youtube.com") {
         args.extend([
             "--match-filter".to_string(),
             "live_status!=is_upcoming & live_status!=is_live".to_string(),
         ]);
     }
 
+    let output_template = output_dir.join("%(id)s.tmp.%(ext)s");
     args.extend([
         "--retries".to_string(),
         "3".to_string(),
@@ -210,10 +255,31 @@ pub async fn extract_audio(
         return Err(AppError::ExtractionFailed(stderr));
     }
 
-    let audio_path = output_dir.join(format!("{video_id}.m4a"));
-    if !audio_path.exists() {
+    let temp_path = output_dir.join(format!("{video_id}.tmp.m4a"));
+    if !temp_path.exists() {
         return Err(AppError::OutputNotFound);
     }
 
+    // ffmpeg -i <video_id>.tmp.m4a -ac 1 -b:a 48k -y <video_id>.m4a
+    // Re-encode to mono 32k and save as final <video_id>.m4a
+    let audio_path = output_dir.join(format!("{video_id}.m4a"));
+    let ffmpeg_args = vec![
+        "-i".to_string(),
+        temp_path.to_string_lossy().to_string(),
+        "-ac".to_string(),
+        "1".to_string(),
+        "-b:a".to_string(),
+        "48k".to_string(),
+        "-y".to_string(),
+        audio_path.to_string_lossy().to_string(),
+    ];
+    let (code, _stdout, stderr) = run_sidecar(app, "binaries/ffmpeg", ffmpeg_args).await?;
+    if code != 0 {
+        let _ = std::fs::remove_file(&temp_path);
+        return Err(AppError::ExtractionFailed(stderr));
+    }
+    let _ = std::fs::remove_file(&temp_path);
+
     Ok(audio_path)
 }
+

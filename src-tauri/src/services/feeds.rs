@@ -1,7 +1,7 @@
 use tauri::{AppHandle, Manager};
 
 use crate::error::AppError;
-use crate::models::{CreateFeedRequest, CreateFeedResponse, Feed, FeedDetailResponse};
+use crate::models::{CreateFeedRequest, CreateFeedResponse, Feed, FeedDetailResponse, UpdateFeedRequest};
 use crate::state::AppState;
 
 use super::sync;
@@ -48,6 +48,25 @@ pub async fn fetch_feed_detail(
     let api = state.api.read().await;
     api.request::<FeedDetailResponse>(&format!("/api/v1/feeds/{feed_id}"), "GET", true)
         .await
+}
+
+pub async fn update_feed_artwork(
+    app: &AppHandle,
+    feed_id: &str,
+    artwork_url: &str,
+) -> Result<(), AppError> {
+    let state = app.state::<AppState>();
+    let body = UpdateFeedRequest {
+        artwork_url: Some(artwork_url.to_string()),
+    };
+    let api = state.api.read().await;
+    api.request_no_content(
+        &format!("/api/v1/feeds/{feed_id}"),
+        "PATCH",
+        Some(&body),
+        true,
+    )
+    .await
 }
 
 pub async fn delete_feed(app: &AppHandle, feed_id: &str) -> Result<(), AppError> {

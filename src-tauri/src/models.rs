@@ -92,6 +92,12 @@ pub struct UpdateEpisodeRequest {
 }
 
 #[derive(Debug, Serialize)]
+pub struct UpdateFeedRequest {
+    #[serde(rename = "artwork_url", skip_serializing_if = "Option::is_none")]
+    pub artwork_url: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
 pub struct UpdateEpisodeMetadataRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,

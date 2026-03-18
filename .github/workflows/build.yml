@@ -20,10 +20,10 @@ jobs:
           - platform: macos-latest
             target: aarch64-apple-darwin
             args: --target aarch64-apple-darwin
-          # Use macos-13 (Intel) for x86_64: macos-latest is ARM64, and PyInstaller
+          # Use macos-15-intel for x86_64: macos-latest is ARM64, and PyInstaller
           # builds for the host arch, so an ARM runner would produce an ARM binary
           # mislabeled as x86_64 → "bad CPU type in executable" on Intel Macs.
-          - platform: macos-13
+          - platform: macos-15-intel
             target: x86_64-apple-darwin
             args: --target x86_64-apple-darwin
           - platform: windows-latest

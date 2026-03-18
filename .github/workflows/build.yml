@@ -122,6 +122,34 @@ jobs:
           security list-keychain -d user -s "$KEYCHAIN_PATH"
           rm certificate.p12
 
+      - name: Codesign yt-dlp sidecar (macOS)
+        if: startsWith(matrix.platform, 'macos')
+        shell: bash
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          set -euo pipefail
+          BIN="src-tauri/binaries/yt-dlp-${{ matrix.target }}"
+          ENT="src-tauri/entitlements/yt-dlp.plist"
+          if [ ! -f "$BIN" ]; then
+            echo "ERROR: missing sidecar $BIN"
+            ls -la src-tauri/binaries || true
+            exit 1
+          fi
+          if [ ! -f "$ENT" ]; then
+            echo "ERROR: missing entitlements $ENT"
+            exit 1
+          fi
+          if [ -z "${APPLE_SIGNING_IDENTITY:-}" ]; then
+            echo "ERROR: APPLE_SIGNING_IDENTITY is empty"
+            exit 1
+          fi
+          codesign --force --options runtime \
+            --entitlements "$ENT" \
+            --sign "$APPLE_SIGNING_IDENTITY" \
+            "$BIN"
+          codesign -dv --entitlements :- "$BIN" || true
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:

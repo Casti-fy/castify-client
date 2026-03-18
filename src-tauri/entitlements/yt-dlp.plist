@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!--
+    yt-dlp sidecar is built with PyInstaller onefile. At runtime it extracts and dlopens an embedded
+    Python.framework which may be signed with a different Team ID than the signed app/sidecar.
+    Hardened runtime will reject this unless library validation is disabled for the sidecar.
+  -->
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+</dict>
+</plist>

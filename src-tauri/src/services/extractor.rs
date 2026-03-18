@@ -24,10 +24,29 @@ fn prepend_sidecar_deno_to_path(app: &AppHandle) -> Option<(String, String)> {
         sidecar_dirs.push(resource_dir);
     }
 
+    let target_triple = option_env!("TAURI_ENV_TARGET_TRIPLE").unwrap_or("");
     let deno_name = if cfg!(windows) { "deno.exe" } else { "deno" };
+    let deno_name_suffixed = if target_triple.is_empty() {
+        None
+    } else if cfg!(windows) {
+        Some(format!("deno-{target_triple}.exe"))
+    } else {
+        Some(format!("deno-{target_triple}"))
+    };
+
     let deno_dir = sidecar_dirs
         .into_iter()
-        .find(|dir| dir.is_dir() && dir.join(deno_name).is_file())?;
+        .find(|dir| {
+            if !dir.is_dir() {
+                return false;
+            }
+            if dir.join(deno_name).is_file() {
+                return true;
+            }
+            deno_name_suffixed
+                .as_deref()
+                .is_some_and(|n| dir.join(n).is_file())
+        })?;
 
     let deno_dir_str = deno_dir.to_string_lossy().to_string();
     if current_path.split(path_sep).any(|p| p == deno_dir_str) {
@@ -89,26 +108,45 @@ fn resolve_sidecar(app: &AppHandle, name: &str) -> Result<PathBuf, AppError> {
         .ok_or_else(|| AppError::Other("cannot resolve exe dir".into()))?;
 
     let base_name = Path::new(name).file_name().unwrap_or(name.as_ref());
-    let exe_name = if cfg!(windows) {
-        format!("{}.exe", base_name.to_string_lossy())
-    } else {
-        base_name.to_string_lossy().to_string()
-    };
+    let base_name = base_name.to_string_lossy().to_string();
+    let target_triple = option_env!("TAURI_ENV_TARGET_TRIPLE").unwrap_or("");
 
-    // Try exe dir first (where Tauri places sidecars)
-    let candidate = exe_dir.join(&exe_name);
-    if candidate.exists() {
-        return Ok(candidate);
+    // Tauri sidecars are commonly shipped as `<name>-<target_triple>` (and `.exe` on Windows)
+    // but in dev they may also be present as `<name>`.
+    let mut candidates: Vec<String> = Vec::new();
+    if cfg!(windows) {
+        candidates.push(format!("{base_name}.exe"));
+        if !target_triple.is_empty() {
+            candidates.push(format!("{base_name}-{target_triple}.exe"));
+        }
+    } else {
+        candidates.push(base_name.clone());
+        if !target_triple.is_empty() {
+            candidates.push(format!("{base_name}-{target_triple}"));
+        }
+    }
+
+    // Try exe dir first (where Tauri places sidecars in dev)
+    for exe_name in &candidates {
+        let candidate = exe_dir.join(exe_name);
+        if candidate.exists() {
+            return Ok(candidate);
+        }
     }
 
     // Try resource dir
     let resource_dir = app.path().resource_dir().unwrap_or_default();
-    let candidate = resource_dir.join(&exe_name);
-    if candidate.exists() {
-        return Ok(candidate);
+    for exe_name in &candidates {
+        let candidate = resource_dir.join(exe_name);
+        if candidate.exists() {
+            return Ok(candidate);
+        }
     }
 
-    Err(AppError::Other(format!("sidecar not found: {exe_name}")))
+    Err(AppError::Other(format!(
+        "sidecar not found: tried {}",
+        candidates.join(", ")
+    )))
 }
 
 /// Run a sidecar binary and collect stdout/stderr, returning (exit_code, stdout, stderr).

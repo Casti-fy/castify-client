@@ -85,8 +85,10 @@ pub async fn scan_new_feed(app: &AppHandle, feed: &Feed) {
 
 /// Sync a single feed: scan for new episodes, then push any not-ready ones as Urgent.
 pub async fn sync_single_feed(app: &AppHandle, feed_id: &str) -> Result<(), AppError> {
+    let detail = feeds_service::fetch_feed_detail(app, feed_id).await?;
+    let feed = detail.feed.clone();
     push_feed_episodes(app, feed_id, Priority::Urgent).await;
-    // run_sync_for_feeds(app, &feeds, 100, Priority::Urgent).await?;
+    run_sync_for_feeds(app, &[feed], 10, Priority::Urgent).await?;
     Ok(())
 }
 
@@ -157,6 +159,13 @@ pub async fn start_periodic_sync(app: &AppHandle) -> Result<(), AppError> {
         }
     }));
 
+    // Ensure we have fresh channel receivers in case sync was previously started/stopped.
+    if state.sync_channels.download_rx.lock().await.is_none()
+        || state.sync_channels.upload_rx.lock().await.is_none()
+    {
+        state.sync_channels.reset().await;
+    }
+
     let dl_rx = state.sync_channels.download_rx.lock().await.take();
     let ul_rx = state.sync_channels.upload_rx.lock().await.take();
 
@@ -226,6 +235,8 @@ pub async fn stop_periodic_sync(app: AppHandle) -> Result<(), AppError> {
     if let Some(h) = handles.upload.take() {
         h.abort();
     }
+    // Reset channels so a future start can obtain fresh receivers.
+    state.sync_channels.reset().await;
     Ok(())
 }
 

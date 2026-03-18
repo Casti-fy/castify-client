@@ -33,7 +33,8 @@
     ],
     "externalBin": [
       "binaries/yt-dlp",
-      "binaries/ffmpeg"
+      "binaries/ffmpeg",
+      "binaries/deno"
     ],
     "windows": {
       "nsis": {

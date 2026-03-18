@@ -6,6 +6,79 @@ use tauri::{AppHandle, Manager};
 use crate::error::AppError;
 use crate::models::PlaylistEntry;
 
+fn prepend_sidecar_deno_to_path(app: &AppHandle) -> Option<(String, String)> {
+    // yt-dlp may use Deno for YouTube n-challenge solving.
+    // We always ship `deno` as a sidecar, so prefer that deterministic runtime.
+    let path_sep = if cfg!(windows) { ';' } else { ':' };
+    let current_path = std::env::var("PATH").unwrap_or_default();
+
+    // Sidecars live next to the executable in dev, and under resource dir in production.
+    let mut sidecar_dirs: Vec<PathBuf> = Vec::new();
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            sidecar_dirs.push(dir.to_path_buf());
+        }
+    }
+    let resource_dir = app.path().resource_dir().unwrap_or_default();
+    if !resource_dir.as_os_str().is_empty() {
+        sidecar_dirs.push(resource_dir);
+    }
+
+    let deno_name = if cfg!(windows) { "deno.exe" } else { "deno" };
+    let deno_dir = sidecar_dirs
+        .into_iter()
+        .find(|dir| dir.is_dir() && dir.join(deno_name).is_file())?;
+
+    let deno_dir_str = deno_dir.to_string_lossy().to_string();
+    if current_path.split(path_sep).any(|p| p == deno_dir_str) {
+        return None;
+    }
+
+    Some((
+        "PATH".to_string(),
+        format!("{deno_dir_str}{path_sep}{current_path}"),
+    ))
+}
+
+fn maybe_deno_js_runtime_arg(app: &AppHandle) -> Option<String> {
+    // Prefer explicitly wiring Deno to yt-dlp so it can be used even if PATH resolution differs
+    // between dev/prod packaging.
+    let deno_path = resolve_sidecar(app, "binaries/deno").ok()?;
+    Some(format!("deno:{}", deno_path.to_string_lossy()))
+}
+
+fn maybe_ffmpeg_location_args(app: &AppHandle) -> Vec<String> {
+    // Always point yt-dlp at the bundled ffmpeg directory so its postprocessors work
+    // even when system ffmpeg isn't on PATH.
+    let Ok(ffmpeg_path) = resolve_sidecar(app, "binaries/ffmpeg") else {
+        return Vec::new();
+    };
+    let Some(dir) = ffmpeg_path.parent() else {
+        return Vec::new();
+    };
+    vec![
+        "--ffmpeg-location".to_string(),
+        dir.to_string_lossy().to_string(),
+    ]
+}
+
+fn ytdlp_base_args(app: &AppHandle) -> Vec<String> {
+    let mut args = Vec::new();
+    args.extend(maybe_ffmpeg_location_args(app));
+
+    // Download the EJS challenge solver so YouTube serves real formats.
+    args.push("--remote-components".to_string());
+    args.push("ejs:github".to_string());
+
+    // Explicitly wire the bundled Deno runtime to yt-dlp's JS runtime system.
+    if let Some(runtime) = maybe_deno_js_runtime_arg(app) {
+        args.push("--js-runtimes".to_string());
+        args.push(runtime);
+    }
+
+    args
+}
+
 /// Resolve the absolute path of a sidecar binary.
 fn resolve_sidecar(app: &AppHandle, name: &str) -> Result<PathBuf, AppError> {
     // In dev mode, sidecars are next to the built binary in target/debug/
@@ -48,8 +121,14 @@ async fn run_sidecar(
     let bin_name = bin_path.file_name().unwrap_or(name.as_ref()).to_string_lossy();
     log::info!("[sidecar] {} {}", bin_name, args.join(" "));
 
-    let output = tokio::process::Command::new(&bin_path)
-        .args(&args)
+    let mut cmd = tokio::process::Command::new(&bin_path);
+    cmd.args(&args);
+
+    if let Some((k, v)) = prepend_sidecar_deno_to_path(app) {
+        cmd.env(k, v);
+    }
+
+    let output = cmd
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
@@ -81,8 +160,10 @@ pub async fn fetch_playlist(
     // yt-dlp --flat-playlist --dump-json --playlist-end 10 https://www.youtube.com/@VTCNewstintuc # likely have live
 
     let mut args = vec!["--ignore-errors".to_string()];
+    args.extend(ytdlp_base_args(app));
 
     args.extend([
+        "--flat-playlist".to_string(), // less error
         "--dump-json".to_string(),
         "--playlist-end".to_string(),
         max_items.to_string(),
@@ -126,13 +207,14 @@ pub async fn fetch_video_metadata(
     url: &str,
 ) -> Result<PlaylistEntry, AppError> {
     // yt-dlp --dump-json --skip-download --no-playlist https://www.youtube.com/watch?v=TjUhXbGdLYo
-    let args = vec![
-        "--ignore-errors".to_string(),
+    let mut args = vec!["--ignore-errors".to_string()];
+    args.extend(ytdlp_base_args(app));
+    args.extend([
         "--dump-json".to_string(),
         "--skip-download".to_string(),
         "--no-playlist".to_string(),
         url.to_string(),
-    ];
+    ]);
 
     let (code, stdout, stderr) = run_sidecar(app, "binaries/yt-dlp", args).await?;
 
@@ -164,13 +246,14 @@ pub async fn fetch_channel_artwork_url(
     url: &str,
 ) -> Result<Option<String>, AppError> {
     // yt-dlp --flat-playlist --dump-single-json --playlist-items 0 https://www.youtube.com/@TuanTienTi2911
-    let args = vec![
-        "--flat-playlist".to_string(),
+    let mut args = vec!["--flat-playlist".to_string()];
+    args.extend(ytdlp_base_args(app));
+    args.extend([
         "--dump-single-json".to_string(),
         "--playlist-items".to_string(),
         "0".to_string(),
         url.to_string(),
-    ];
+    ]);
 
     let (code, stdout, stderr) = run_sidecar(app, "binaries/yt-dlp", args).await?;
 
@@ -210,79 +293,191 @@ pub async fn download_audio(
     // https://api.soundcloud.com/tracks/1212266641
     // --ffmpeg-location "<resource_dir>/binaries" # system may not have
     // --match-filter "live_status!=is_upcoming & live_status!=is_live" # youtube, need?
+
+    
     let audio_path = output_dir.join(format!("{video_id}.m4a"));
+    let temp_path = output_dir.join(format!("{video_id}.tmp.m4a"));
+
     if audio_path.exists() {
         return Ok(audio_path);
     }
 
-    // Build yt-dlp args
-    let mut args: Vec<String> = Vec::new();
+    let find_tmp_input = || -> Option<PathBuf> {
+        if temp_path.exists() {
+            return Some(temp_path.clone());
+        }
+        let rd = std::fs::read_dir(output_dir).ok()?;
+        for entry in rd.flatten() {
+            let p = entry.path();
+            if !p.is_file() {
+                continue;
+            }
+            let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
+            if name.starts_with(&format!("{video_id}.tmp."))
+                && !name.ends_with(".part")
+                && !name.ends_with(".ytdl")
+            {
+                return Some(p);
+            }
+        }
+        None
+    };
 
-    // Resolve ffmpeg sidecar path for --ffmpeg-location
-    // Tauri sidecars are placed next to the app binary at runtime
-    let resource_dir: PathBuf = app.path().resource_dir().unwrap_or_default();
-    let ffmpeg_candidate = resource_dir.join("binaries").join("ffmpeg");
-    if ffmpeg_candidate.exists() {
-        if let Some(dir) = ffmpeg_candidate.parent() {
-            args.push("--ffmpeg-location".to_string());
-            args.push(dir.to_string_lossy().to_string());
+    // If a previous run already left a temp download, skip yt-dlp and just extract audio.
+    let mut tmp_input = find_tmp_input();
+
+    if tmp_input.is_none() && !temp_path.exists() {
+        // Common yt-dlp args (independent of YouTube client selection)
+        let mut common_args: Vec<String> = Vec::new();
+
+
+        // Download the EJS challenge solver so YouTube serves real formats.
+        common_args.push("--remote-components".to_string());
+        common_args.push("ejs:github".to_string());
+
+        // Explicitly wire the bundled Deno runtime to yt-dlp's JS runtime system.
+        if let Some(runtime) = maybe_deno_js_runtime_arg(app) {
+            common_args.push("--js-runtimes".to_string());
+            common_args.push(runtime);
+        }
+
+        common_args.push("--no-playlist".to_string());
+
+        let output_template = output_dir.join("%(id)s.tmp.%(ext)s");
+        let base_download_args = vec![
+            "--retries".to_string(),
+            "3".to_string(),
+            "-x".to_string(),
+            "--audio-format".to_string(),
+            "m4a".to_string(),
+            "--audio-quality".to_string(),
+            "0".to_string(),
+            "-o".to_string(),
+            output_template.to_string_lossy().to_string(),
+            url.to_string(),
+        ];
+
+        let needs_cookies = |stderr: &str| {
+            stderr.contains("Sign in")
+                || stderr.contains("bot")
+                || stderr.contains("HTTP Error 429")
+                || stderr.contains("Login required")
+        };
+
+        let needs_fallback = |stderr: &str| {
+            stderr.contains("Only images are available for download")
+                || stderr.contains("n challenge solving failed")
+                || stderr.contains("Some formats may be missing")
+                || stderr.contains("missing a url")
+                || stderr.contains("Requested format is not available")
+        };
+
+        let is_android_po_token_block = |stderr: &str| {
+            stderr.contains("android client https formats require a GVS PO Token")
+        };
+
+        // Try clients in order. Avoid forcing android by default because some videos
+        // require PO tokens and will fail.
+        let client_modes: [Option<&str>; 3] = [
+            None,
+            Some("youtube:player_client=web"),
+            Some("youtube:player_client=android"),
+        ];
+
+        let mut last_stderr = String::new();
+        let mut success = false;
+
+        for client in client_modes {
+            // Skip android if we already saw PO-token blocking.
+            if client == Some("youtube:player_client=android") && is_android_po_token_block(&last_stderr)
+            {
+                continue;
+            }
+
+            let mut attempt_args = common_args.clone();
+            if let Some(client_arg) = client {
+                attempt_args.push("--extractor-args".to_string());
+                attempt_args.push(client_arg.to_string());
+            }
+            attempt_args.extend(base_download_args.clone());
+
+            // First attempt for this client: no cookies.
+            let (code1, _stdout1, stderr1) =
+                run_sidecar(app, "binaries/yt-dlp", attempt_args.clone()).await?;
+            if code1 == 0 {
+                success = true;
+                break;
+            }
+            last_stderr = stderr1.clone();
+
+            // Retry with cookies only for auth/bot style failures.
+            if needs_cookies(&stderr1) {
+                let mut cookie_args = attempt_args;
+                cookie_args.extend([
+                    "--cookies-from-browser".to_string(),
+                    "chrome".to_string(),
+                ]);
+                let (code2, _stdout2, stderr2) =
+                    run_sidecar(app, "binaries/yt-dlp", cookie_args).await?;
+                if code2 == 0 {
+                    success = true;
+                    break;
+                }
+                last_stderr = stderr2;
+            }
+
+            // If this was an android PO-token block, continue to other clients (web/default).
+            if client == Some("youtube:player_client=android") && is_android_po_token_block(&last_stderr)
+            {
+                continue;
+            }
+
+            // Otherwise only continue trying other clients for "formats missing" style failures.
+            if !needs_fallback(&last_stderr) {
+                break;
+            }
+        }
+
+        if !success {
+            // If yt-dlp failed only at postprocessing time, it may have still
+            // downloaded the media file (e.g. `<id>.tmp.mp4`). In that case, we can
+            // continue to our own ffmpeg extraction step.
+            let postproc_failed = last_stderr.contains("Postprocessing:")
+                && last_stderr.contains("audio conversion failed");
+            if !(postproc_failed && find_tmp_input().is_some()) {
+                return Err(AppError::ExtractionFailed(last_stderr));
+            }
         }
     }
 
-    args.push("--no-playlist".to_string());
-
-    // YouTube-specific filter: skip premieres and live streams.
-    if url.contains("youtube.com") {
-        args.extend([
-            "--match-filter".to_string(),
-            "live_status!=is_upcoming & live_status!=is_live".to_string(),
-        ]);
+    if tmp_input.is_none() {
+        tmp_input = find_tmp_input();
     }
 
-    let output_template = output_dir.join("%(id)s.tmp.%(ext)s");
-    args.extend([
-        "--retries".to_string(),
-        "3".to_string(),
-        "-x".to_string(),
-        "--audio-format".to_string(),
-        "m4a".to_string(),
-        "--audio-quality".to_string(),
-        "0".to_string(),
-        "-o".to_string(),
-        output_template.to_string_lossy().to_string(),
-        url.to_string(),
-    ]);
+    let input_path = tmp_input.ok_or_else(|| {
+        AppError::ExtractionFailed(format!("no temp file found for {video_id}"))
+    })?;
 
-    let (code, _stdout, stderr) = run_sidecar(app, "binaries/yt-dlp", args).await?;
-
-    if code != 0 {
-        return Err(AppError::ExtractionFailed(stderr));
-    }
-
-    let temp_path = output_dir.join(format!("{video_id}.tmp.m4a"));
-    if !temp_path.exists() {
-        return Err(AppError::OutputNotFound);
-    }
-
-    // ffmpeg -i <video_id>.tmp.m4a -ac 1 -b:a 48k -y <video_id>.m4a
-    // Re-encode to mono 32k and save as final <video_id>.m4a
-    let audio_path = output_dir.join(format!("{video_id}.m4a"));
+    // ffmpeg -i <tmp.(m4a|mp4|webm...)> -ac 1 -b:a 48k -vn -map 0:a:0 -y <id>.m4a
+    // Re-encode to mono 48k, drop video stream, and save as final <id>.m4a
     let ffmpeg_args = vec![
         "-i".to_string(),
-        temp_path.to_string_lossy().to_string(),
-        "-ac".to_string(),
-        "1".to_string(),
-        "-b:a".to_string(),
-        "48k".to_string(),
-        "-y".to_string(),
-        audio_path.to_string_lossy().to_string(),
+        input_path.to_string_lossy().to_string(),
+        "-vn".to_string(), // drop video stream
+        "-map".to_string(), "0:a:0".to_string(), // take first audio stream only
+        "-ac".to_string(), "1".to_string(), // mono
+        "-b:a".to_string(), "48k".to_string(), // 48k bitrate
+        "-f".to_string(), "mov".to_string(), //mov, ipod
+        "-c:a".to_string(), "aac".to_string(), // AAC codec
+        "-y".to_string(), // overwrite
+        audio_path.to_string_lossy().to_string(), // output path
     ];
     let (code, _stdout, stderr) = run_sidecar(app, "binaries/ffmpeg", ffmpeg_args).await?;
     if code != 0 {
-        let _ = std::fs::remove_file(&temp_path);
+        // let _ = std::fs::remove_file(&temp_path);
         return Err(AppError::ExtractionFailed(stderr));
     }
-    let _ = std::fs::remove_file(&temp_path);
+    // let _ = std::fs::remove_file(&temp_path);
 
     Ok(audio_path)
 }

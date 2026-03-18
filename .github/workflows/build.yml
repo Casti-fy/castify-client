@@ -75,6 +75,7 @@ jobs:
           update: true
           install: >-
             git
+            curl
             make
             diffutils
             mingw-w64-ucrt-x86_64-gcc
@@ -90,7 +91,7 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
-      # Build sidecar binaries (YouTube-only yt-dlp from source + minimal ffmpeg)
+      # Build sidecar binaries (yt-dlp + minimal ffmpeg + deno runtime)
       - name: Build sidecar binaries (Unix)
         if: matrix.platform != 'windows-latest'
         shell: bash

@@ -29,6 +29,9 @@ CORE_MODULES = {
     "genericembeds",
     "openload",
     "adobepass",  # imported directly by yt_dlp/__init__.py
+    # Some non-target extractors are imported by core downloader logic in newer yt-dlp.
+    # Keep them to avoid import-time failures during build (lazy extractor generation).
+    "afreecatv",
 }
 
 

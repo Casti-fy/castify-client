@@ -33,6 +33,18 @@ pub async fn upload_to_b2(
     Ok(())
 }
 
+/// True if the upload error may succeed on retry (server overload, rate limit, etc.).
+pub fn upload_error_is_transient(e: &AppError) -> bool {
+    match e {
+        AppError::UploadFailed(code) => matches!(
+            *code,
+            408 | 429 | 500 | 502 | 503 | 504
+        ),
+        AppError::Network(_) => true,
+        _ => false,
+    }
+}
+
 fn hex_sha1(data: &[u8]) -> String {
     let mut hasher = Sha1::new();
     hasher.update(data);

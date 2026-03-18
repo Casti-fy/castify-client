@@ -28,8 +28,10 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 BINARIES_DIR="$PROJECT_DIR/src-tauri/binaries"
 
 # Versions
-YTDLP_VERSION="2025.03.31"
+# Pin to a recent release; YouTube breaks older builds (nsig / format errors).
+YTDLP_VERSION="2026.03.17"
 FFMPEG_VERSION="7.1"
+deno_VERSION="2.2.5"
 MACOS_MIN="12.0"
 
 # Extractors to keep (add more here to support additional sites)
@@ -40,12 +42,14 @@ FORCE=false
 TARGET_TRIPLE=""
 BUILD_FFMPEG=true
 BUILD_YTDLP=true
+BUILD_DENO=true
 
 for arg in "$@"; do
     case "$arg" in
         --force) FORCE=true ;;
         --ffmpeg-only) BUILD_YTDLP=false ;;
         --yt-dlp-only) BUILD_FFMPEG=false ;;
+        --deno-only) BUILD_YTDLP=false; BUILD_FFMPEG=false ;;
         --target)
             # Next arg will be the target
             ;;
@@ -107,6 +111,69 @@ else
     exit 1
 fi
 echo "==> Python: $PYTHON"
+
+# =============================================================================
+# Fetch deno runtime (for yt-dlp YouTube challenge solving)
+# =============================================================================
+if [ "$BUILD_DENO" = true ]; then
+    DENO_OUT="$BINARIES_DIR/deno-${TARGET_TRIPLE}"
+    [ "$OS" = "windows" ] && DENO_OUT="${DENO_OUT}.exe"
+
+    if [ "$FORCE" = false ] && [ -f "$DENO_OUT" ]; then
+        echo "deno already exists at $DENO_OUT. Use --force to rebuild."
+    else
+        echo ""
+        echo "==> Fetching deno ${deno_VERSION} for ${OS}/${ARCH}..."
+
+        # Map to Deno release artifact names
+        DENO_PLATFORM=""
+        case "$OS" in
+            macos)   DENO_PLATFORM="apple-darwin" ;;
+            linux)   DENO_PLATFORM="unknown-linux-gnu" ;;
+            windows) DENO_PLATFORM="pc-windows-msvc" ;;
+        esac
+
+        DENO_ARCH="$ARCH"
+        case "$ARCH" in
+            arm64)   DENO_ARCH="aarch64" ;;
+            x86_64)  DENO_ARCH="x86_64" ;;
+            aarch64) DENO_ARCH="aarch64" ;;
+        esac
+
+        DENO_ZIP="deno-${DENO_ARCH}-${DENO_PLATFORM}.zip"
+        DENO_URL="https://github.com/denoland/deno/releases/download/v${deno_VERSION}/${DENO_ZIP}"
+
+        BUILD_DIR="$(mktemp -d)"
+        export BUILD_DIR
+        echo "    Download: $DENO_ZIP"
+        curl -L --fail --progress-bar -o "$BUILD_DIR/deno.zip" "$DENO_URL"
+
+        # Extract using Python for portability (no unzip dependency).
+        $PYTHON - <<'PY'
+import os, zipfile
+build_dir = os.environ["BUILD_DIR"]
+with zipfile.ZipFile(os.path.join(build_dir, "deno.zip")) as z:
+    z.extractall(build_dir)
+PY
+
+        DENO_BIN="$BUILD_DIR/deno"
+        if [ "$OS" = "windows" ]; then
+            DENO_BIN="$BUILD_DIR/deno.exe"
+        fi
+
+        if [ ! -f "$DENO_BIN" ]; then
+            echo "ERROR: deno binary not found after extracting"
+            ls -la "$BUILD_DIR" || true
+            exit 1
+        fi
+
+        cp "$DENO_BIN" "$DENO_OUT"
+        chmod +x "$DENO_OUT" || true
+        rm -rf "$BUILD_DIR"
+
+        echo "    deno: $(du -h "$DENO_OUT" | cut -f1) -> $(basename "$DENO_OUT")"
+    fi
+fi
 
 # =============================================================================
 # Build yt-dlp from source (YouTube-only)

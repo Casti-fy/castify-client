@@ -165,6 +165,34 @@ jobs:
         with:
           args: ${{ matrix.args }}
 
+      # Repack AppImage with fuse3-compatible runtime so it works on
+      # modern distros (Debian 13+, Fedora 40+) without libfuse2.
+      - name: Repack AppImage (no libfuse2 dependency)
+        if: matrix.platform == 'ubuntu-22.04'
+        shell: bash
+        run: |
+          set -euo pipefail
+          APPIMAGE=$(find src-tauri/target -name '*.AppImage' -type f | head -1)
+          if [ -z "$APPIMAGE" ]; then
+            echo "No AppImage found, skipping repack"
+            exit 0
+          fi
+          echo "==> Repacking $APPIMAGE with fuse3-compatible runtime..."
+
+          # Download latest appimagetool (ships fuse3/no-fuse runtime)
+          curl -fSL -o /tmp/appimagetool \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x /tmp/appimagetool
+
+          # Extract the original AppImage
+          "$APPIMAGE" --appimage-extract
+
+          # Repack with the new runtime
+          ARCH=x86_64 /tmp/appimagetool --appimage-extract-and-run squashfs-root "$APPIMAGE"
+          rm -rf squashfs-root
+
+          echo "==> Repacked AppImage: $(du -h "$APPIMAGE" | cut -f1)"
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:

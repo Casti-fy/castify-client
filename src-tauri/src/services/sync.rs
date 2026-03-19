@@ -198,13 +198,12 @@ pub async fn auto_start_sync(app: &AppHandle) {
         return;
     }
 
+    startup_recovery(app).await;
+
     if let Err(e) = start_periodic_sync(app).await {
         log::warn!("Auto-start sync failed: {e}");
         return;
     }
-
-    // Recover incomplete episodes after workers are running
-    startup_recovery(app).await;
 }
 
 /// Fetch all not-ready episodes and push them to channels as Normal priority.
@@ -220,7 +219,6 @@ async fn startup_recovery(app: &AppHandle) {
     for feed in &feeds {
         push_feed_episodes(app, &feed.id, Priority::Normal).await;
     }
-
 }
 
 pub async fn stop_periodic_sync(app: AppHandle) -> Result<(), AppError> {

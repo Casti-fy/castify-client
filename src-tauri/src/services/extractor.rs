@@ -162,6 +162,17 @@ async fn run_sidecar(
     let mut cmd = tokio::process::Command::new(&bin_path);
     cmd.args(&args);
 
+    // On Windows, prevent a visible console window from flashing for each
+    // spawned sidecar process (yt-dlp, ffmpeg, deno).
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    // Some sidecars (yt-dlp) may execute JS components (YouTube n-challenge solving),
+    // so we prepend our bundled `deno` to PATH.
     if let Some((k, v)) = prepend_sidecar_deno_to_path(app) {
         cmd.env(k, v);
     }
@@ -240,6 +251,7 @@ pub fn episode_url(feed_source_url: &str, video_id: &str) -> String {
 }
 
 /// Pass 2: Fetch full metadata for a single episode by URL.
+#[allow(dead_code)]
 pub async fn fetch_video_metadata(
     app: &AppHandle,
     url: &str,

@@ -47,8 +47,8 @@ BUILD_DENO=true
 for arg in "$@"; do
     case "$arg" in
         --force) FORCE=true ;;
-        --ffmpeg-only) BUILD_YTDLP=false ;;
-        --yt-dlp-only) BUILD_FFMPEG=false ;;
+        --ffmpeg-only) BUILD_YTDLP=false ; BUILD_DENO=false ;;
+        --yt-dlp-only) BUILD_FFMPEG=false ; BUILD_DENO=false ;;
         --deno-only) BUILD_YTDLP=false; BUILD_FFMPEG=false ;;
         --target)
             # Next arg will be the target

@@ -11,59 +11,6 @@ use crate::state::{AppState, ChannelReceivers, Job, Priority};
 
 const SEEN_CAP: usize = 1000;
 
-async fn process_download(app: &AppHandle, job: Job) -> Result<(), AppError> {
-    let feed_id = &job.feed_id;
-    let episode_id = &job.episode_id;
-
-    let temp_dir = helpers::temp_dir_for_feed(feed_id);
-    if let Err(e) = tokio::fs::create_dir_all(&temp_dir).await {
-        log::warn!("Failed to create temp dir: {e}");
-        return Ok(());
-    }
-
-    let audio_path = temp_dir.join(format!("{}.m4a", job.video_id));
-    let ep_url = job.episode_url.clone();
-
-    if audio_path.exists() {
-        log::info!("Already downloaded locally: {}", job.episode_title);
-        let _ = episode_service::update_status(app, episode_id, "uploading", None).await;
-        let state = app.state::<AppState>();
-        state.sync_channels.send_upload(job).await;
-        return Ok(());
-    }
-
-    // Optional: we could still backfill metadata here using ep_url without needing feed_detail,
-    // but to keep backend/API pressure minimal, we skip it in this refactor.
-
-    helpers::emit_progress(
-        app,
-        feed_id,
-        &job.feed_name,
-        "download",
-        &format!("Downloading: {}", job.episode_title),
-    );
-
-    match extractor::download_audio(app, &ep_url, &job.video_id, &temp_dir).await {
-        Ok(_) => {
-            let _ = episode_service::update_status(app, episode_id, "uploading", None).await;
-
-            let state = app.state::<AppState>();
-            state.sync_channels.send_upload(job).await;
-        }
-        Err(e) => {
-            let err_str = e.to_string();
-            if err_str.contains("Premieres in") || err_str.contains("is_upcoming") {
-                log::info!("Skipping premiere, will retry later: {}", job.episode_title);
-            } else {
-                log::warn!("Download failed for {}: {e}", job.episode_title);
-                let _ = episode_service::update_status(app, episode_id, "failed", None).await;
-            }
-        }
-    }
-
-    Ok(())
-}
-
 pub async fn start_download_worker(app: AppHandle, mut channels: ChannelReceivers) {
     let max_concurrent = helpers::cpu_count().clamp(2, 4);
     let semaphore = Arc::new(tokio::sync::Semaphore::new(max_concurrent));
@@ -124,4 +71,59 @@ pub async fn start_download_worker(app: AppHandle, mut channels: ChannelReceiver
         });
     }
 }
+
+async fn process_download(app: &AppHandle, job: Job) -> Result<(), AppError> {
+    let feed_id = &job.feed_id;
+    let episode_id = &job.episode_id;
+
+    let temp_dir = helpers::temp_dir_for_feed(feed_id);
+    if let Err(e) = tokio::fs::create_dir_all(&temp_dir).await {
+        log::warn!("Failed to create temp dir: {e}");
+        return Ok(());
+    }
+
+    let audio_path = temp_dir.join(format!("{}.m4a", job.video_id));
+    let ep_url = job.episode_url.clone();
+
+    if audio_path.exists() {
+        log::info!("Already downloaded locally: {}", job.episode_title);
+        let _ = episode_service::update_status(app, episode_id, "uploading", None).await;
+        let state = app.state::<AppState>();
+        state.sync_channels.send_upload(job).await;
+        return Ok(());
+    }
+
+    // Optional: we could still backfill metadata here using ep_url without needing feed_detail,
+    // but to keep backend/API pressure minimal, we skip it in this refactor.
+
+    helpers::emit_progress(
+        app,
+        feed_id,
+        &job.feed_name,
+        "download",
+        &format!("Downloading: {}", job.episode_title),
+    );
+
+    match extractor::download_audio(app, &ep_url, &job.video_id, &temp_dir).await {
+        Ok(_) => {
+            let _ = episode_service::update_status(app, episode_id, "uploading", None).await;
+
+            let state = app.state::<AppState>();
+            state.sync_channels.send_upload(job).await;
+        }
+        Err(e) => {
+            let err_str = e.to_string();
+            if err_str.contains("Premieres in") || err_str.contains("is_upcoming") {
+                log::info!("Skipping premiere, will retry later: {}", job.episode_title);
+            } else {
+                log::warn!("Download failed for {}: {e}", job.episode_title);
+                let _ = episode_service::update_status(app, episode_id, "failed", None).await;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+
 

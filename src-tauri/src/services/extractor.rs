@@ -402,6 +402,14 @@ pub async fn download_audio(
                 || stderr.contains("Login required")
         };
 
+        let needs_soundcloud_proxy = |stderr: &str| {
+            stderr.contains("[soundcloud]")
+                && stderr.contains("not available from your location")
+                && stderr.contains("geo restriction")
+        };
+
+        let soundcloud_proxy = "http://45f8da4c3a:mIebKzA1@207.182.30.55:4444";
+
         let needs_fallback = |stderr: &str| {
             stderr.contains("Only images are available for download")
                 || stderr.contains("n challenge solving failed")
@@ -448,6 +456,23 @@ pub async fn download_audio(
             }
             last_stderr = stderr1.clone();
 
+            // SoundCloud geo restriction: retry with proxy.
+            if needs_soundcloud_proxy(&stderr1) {
+                let mut proxy_args = attempt_args.clone();
+                if let Some(u) = proxy_args.pop() {
+                    proxy_args.push("--proxy".to_string());
+                    proxy_args.push(soundcloud_proxy.to_string());
+                    proxy_args.push(u);
+                }
+                let (codep, _stdoutp, stderrp) =
+                    run_sidecar(app, "binaries/yt-dlp", proxy_args).await?;
+                if codep == 0 {
+                    success = true;
+                    break;
+                }
+                last_stderr = stderrp;
+            }
+
             // Retry with cookies only for auth/bot style failures.
             if needs_cookies(&stderr1) {
                 let mut cookie_args = attempt_args;
@@ -456,12 +481,29 @@ pub async fn download_audio(
                     "chrome".to_string(),
                 ]);
                 let (code2, _stdout2, stderr2) =
-                    run_sidecar(app, "binaries/yt-dlp", cookie_args).await?;
+                    run_sidecar(app, "binaries/yt-dlp", cookie_args.clone()).await?;
                 if code2 == 0 {
                     success = true;
                     break;
                 }
                 last_stderr = stderr2;
+
+                // SoundCloud geo restriction even with cookies: retry with proxy.
+                if needs_soundcloud_proxy(&last_stderr) {
+                    let mut proxy_args = cookie_args;
+                    if let Some(u) = proxy_args.pop() {
+                        proxy_args.push("--proxy".to_string());
+                        proxy_args.push(soundcloud_proxy.to_string());
+                        proxy_args.push(u);
+                    }
+                    let (codep, _stdoutp, stderrp) =
+                        run_sidecar(app, "binaries/yt-dlp", proxy_args).await?;
+                    if codep == 0 {
+                        success = true;
+                        break;
+                    }
+                    last_stderr = stderrp;
+                }
             }
 
             // If this was an android PO-token block, continue to other clients (web/default).

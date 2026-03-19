@@ -231,6 +231,26 @@ if [ "$BUILD_YTDLP" = true ]; then
         cp "$YTDLP_BIN" "$YTDLP_OUT"
         chmod +x "$YTDLP_OUT"
 
+        # On macOS, yt-dlp is bundled via PyInstaller (onefile) and contains an embedded
+        # Python.framework. When the surrounding process uses the hardened runtime,
+        # macOS can reject dlopen() if Team IDs/validation don't line up.
+        #
+        # CI signs the sidecar; for local dev builds, ensure the same entitlements + runtime
+        # flags are applied to avoid "Failed to load Python shared library ... different Team IDs".
+        if [ "$OS" = "macos" ] && command -v codesign &>/dev/null; then
+            ENT="$PROJECT_DIR/src-tauri/entitlements/yt-dlp.plist"
+            if [ -f "$ENT" ]; then
+                SIGN_IDENTITY="${APPLE_SIGNING_IDENTITY:--}"
+                echo "==> Codesigning yt-dlp sidecar ($SIGN_IDENTITY)..."
+                codesign --force --options runtime \
+                    --entitlements "$ENT" \
+                    --sign "$SIGN_IDENTITY" \
+                    "$YTDLP_OUT"
+            else
+                echo "WARNING: missing entitlements file $ENT; skipping codesign"
+            fi
+        fi
+
         deactivate 2>/dev/null || true
         rm -rf "$YTDLP_BUILD_DIR"
 

@@ -93,7 +93,11 @@ pub async fn start_download_worker(app: AppHandle, mut channels: ChannelReceiver
             continue;
         }
 
-        if !seen.insert(job.episode_id.clone()) {
+        // De-dupe by (feed_id, video_id) since multiple episodes can point to the same
+        // underlying media ID (e.g. SoundCloud track id). Running two yt-dlp downloads
+        // into the same temp dir with the same output template can race on fragment files.
+        let seen_key = format!("{}:{}", job.feed_id, job.video_id);
+        if !seen.insert(seen_key) {
             continue;
         }
         if seen.len() >= SEEN_CAP {

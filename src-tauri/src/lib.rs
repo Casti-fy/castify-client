@@ -26,8 +26,13 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
-        .manage(AppState::new(DEFAULT_SERVER_URL))
         .setup(|app| {
+            // Create platform-specific config store and AppState
+            let store: std::sync::Arc<dyn services::config_store::ConfigStore> =
+                std::sync::Arc::new(services::tauri_store::TauriConfigStore::new(app.handle()));
+            let app_state = AppState::new(DEFAULT_SERVER_URL, store);
+            app.manage(app_state);
+
             // Wire Tauri's event emitter to AppState so services can emit
             // progress events without depending on Tauri directly.
             {
@@ -46,18 +51,18 @@ pub fn run() {
             }
 
             // Restore token from store
-            if let Ok(token) = crate::services::keychain::get_token(app.handle()) {
-                // TODO: Should check if the token expired and request a new one?
-                let state = app.state::<AppState>();
+            let state = app.state::<AppState>();
+            if let Ok(token) = state.store.get_token() {
                 tauri::async_runtime::block_on(async {
                     state.api.write().await.set_token(Some(token));
                 });
             }
             
-            // Auto-start periodic sync if authenticated
-            let handle = app.handle().clone();
+            // Auto-start periodic sync if authenticated.
+            // IMPORTANT: must run after on_progress and extra_bin_dirs are set above.
+            let state_sync = (*state).clone();
             tauri::async_runtime::spawn(async move {
-                services::sync::auto_start_sync(&handle).await;
+                services::sync::auto_start_sync(&state_sync).await;
             });
 
             // System tray

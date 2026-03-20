@@ -11,7 +11,8 @@ pub async fn login(
     email: String,
     password: String,
 ) -> Result<AuthResponse, AppError> {
-    auth_service::login(&app, email, password).await
+    let state = app.state::<AppState>();
+    auth_service::login(&state, email, password).await
 }
 
 #[tauri::command]
@@ -20,7 +21,8 @@ pub async fn register(
     email: String,
     password: String,
 ) -> Result<AuthResponse, AppError> {
-    auth_service::register(&app, email, password).await
+    let state = app.state::<AppState>();
+    auth_service::register(&state, email, password).await
 }
 
 #[tauri::command]
@@ -39,5 +41,6 @@ pub async fn fetch_plans(
 
 #[tauri::command]
 pub async fn logout(app: AppHandle) -> Result<(), AppError> {
-    auth_service::logout(&app).await
+    let state = app.state::<AppState>();
+    auth_service::logout(&state).await
 }

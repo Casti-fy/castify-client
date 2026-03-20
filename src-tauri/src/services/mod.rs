@@ -1,11 +1,12 @@
 pub mod api_client;
 pub mod auth;
 pub mod billing;
+pub mod config_store;
 pub mod episode;
 pub mod extractor;
 pub mod feeds;
-pub mod keychain;
 pub mod helpers;
+pub mod tauri_store;
 mod sync_download;
 mod sync_scan;
 mod sync_upload;

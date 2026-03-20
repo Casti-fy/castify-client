@@ -1,7 +1,5 @@
 use std::time::Duration;
 
-use tauri::{AppHandle, Manager};
-
 use crate::error::AppError;
 use crate::models::Feed;
 use crate::services::{extractor, feeds as feeds_service};
@@ -60,13 +58,10 @@ pub async fn push_feed_episodes(state: &AppState, feed_id: &str, priority: Prior
 
 /// Scan the first N episodes of a feed and push not-ready ones as Urgent.
 /// Also fetches the channel artwork in parallel.
-pub async fn scan_new_feed(app: &AppHandle, feed: &Feed) {
-    let state = app.state::<AppState>();
-    let state_clone = (*state).clone();
-
+pub async fn scan_new_feed(state: &AppState, feed: &Feed) {
     let feed_id = feed.id.clone();
     let source_url = feed.source_url.clone();
-    let state_artwork = state_clone.clone();
+    let state_artwork = state.clone();
     let artwork_handle = tokio::spawn(async move {
         match extractor::fetch_channel_artwork_url(&state_artwork, &source_url).await {
             Ok(Some(url)) => {
@@ -80,17 +75,16 @@ pub async fn scan_new_feed(app: &AppHandle, feed: &Feed) {
     });
 
     let feeds = [feed.clone()];
-    run_sync_for_feeds(&state_clone, &feeds, 5, Priority::Urgent).await;
+    run_sync_for_feeds(state, &feeds, 5, Priority::Urgent).await;
     let _ = artwork_handle.await;
 }
 
 /// Sync a single feed: scan for new episodes, then push any not-ready ones as Urgent.
-pub async fn sync_single_feed(app: &AppHandle, feed_id: &str) -> Result<(), AppError> {
-    let state = app.state::<AppState>();
-    let detail = feeds_service::fetch_feed_detail(&state, feed_id).await?;
+pub async fn sync_single_feed(state: &AppState, feed_id: &str) -> Result<(), AppError> {
+    let detail = feeds_service::fetch_feed_detail(state, feed_id).await?;
     let feed = detail.feed.clone();
-    push_feed_episodes(&state, feed_id, Priority::Urgent).await;
-    run_sync_for_feeds(&state, &[feed], 10, Priority::Urgent).await;
+    push_feed_episodes(state, feed_id, Priority::Urgent).await;
+    run_sync_for_feeds(state, &[feed], 10, Priority::Urgent).await;
     Ok(())
 }
 
@@ -105,44 +99,27 @@ pub async fn run_sync_for_feeds(
 
 // ----- Settings helpers -----
 
-const SETTINGS_STORE: &str = "settings.json";
-const SYNC_INTERVAL_KEY: &str = "sync_interval_minutes";
-const DEFAULT_SYNC_INTERVAL: u64 = 30;
-
-pub fn read_sync_interval(app: &AppHandle) -> u64 {
-    use tauri_plugin_store::StoreExt;
-
-    app.store(SETTINGS_STORE)
-        .ok()
-        .and_then(|store| store.get(SYNC_INTERVAL_KEY))
-        .and_then(|v| v.as_u64())
-        .unwrap_or(DEFAULT_SYNC_INTERVAL)
+pub fn read_sync_interval(state: &AppState) -> u64 {
+    state.store.read_sync_interval()
 }
 
-pub fn write_sync_interval(app: &AppHandle, minutes: u64) {
-    use tauri_plugin_store::StoreExt;
-
-    if let Ok(store) = app.store(SETTINGS_STORE) {
-        store.set(SYNC_INTERVAL_KEY, serde_json::json!(minutes));
-        let _ = store.save();
-    }
+pub fn write_sync_interval(state: &AppState, minutes: u64) {
+    state.store.write_sync_interval(minutes);
 }
 
 // ----- Periodic sync orchestration -----
 
-pub async fn start_periodic_sync(app: &AppHandle) -> Result<(), AppError> {
-    let state = app.state::<AppState>();
-    let state_clone = (*state).clone();
+pub async fn start_periodic_sync(state: &AppState) -> Result<(), AppError> {
+    let state_clone = state.clone();
     let mut handles = state.sync_handles.lock().await;
 
     log::info!("Starting periodic sync");
 
-    let app_scan = app.clone();
     let state_scan = state_clone.clone();
     handles.scan = Some(tokio::spawn(async move {
         let mut last_scan: Option<tokio::time::Instant> = None;
         loop {
-            let interval_minutes = read_sync_interval(&app_scan);
+            let interval_minutes = read_sync_interval(&state_scan);
             let interval = Duration::from_secs(interval_minutes * 60);
             if let Some(last) = last_scan {
                 if last.elapsed() < interval {
@@ -193,17 +170,16 @@ pub async fn start_periodic_sync(app: &AppHandle) -> Result<(), AppError> {
     Ok(())
 }
 
-pub async fn auto_start_sync(app: &AppHandle) {
-    let state = app.state::<AppState>();
+pub async fn auto_start_sync(state: &AppState) {
     let has_token = state.api.read().await.has_token();
     if !has_token {
         log::info!("No auth token, skipping auto-start sync");
         return;
     }
 
-    startup_recovery(&state).await;
+    startup_recovery(state).await;
 
-    if let Err(e) = start_periodic_sync(app).await {
+    if let Err(e) = start_periodic_sync(state).await {
         log::warn!("Auto-start sync failed: {e}");
         return;
     }
@@ -224,8 +200,7 @@ async fn startup_recovery(state: &AppState) {
     }
 }
 
-pub async fn stop_periodic_sync(app: AppHandle) -> Result<(), AppError> {
-    let state = app.state::<AppState>();
+pub async fn stop_periodic_sync(state: &AppState) -> Result<(), AppError> {
     let mut handles = state.sync_handles.lock().await;
     if let Some(h) = handles.scan.take() {
         h.abort();
@@ -236,7 +211,6 @@ pub async fn stop_periodic_sync(app: AppHandle) -> Result<(), AppError> {
     if let Some(h) = handles.upload.take() {
         h.abort();
     }
-    // Reset channels so a future start can obtain fresh receivers.
     state.sync_channels.reset().await;
     Ok(())
 }

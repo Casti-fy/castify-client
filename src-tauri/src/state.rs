@@ -5,6 +5,7 @@ use tokio::sync::{mpsc, Mutex, RwLock};
 
 use crate::models::SyncProgressEvent;
 use crate::services::api_client::ApiClient;
+use crate::services::config_store::ConfigStore;
 
 /// Callback for emitting sync progress events.
 /// GUI sets this to forward events to the webview; CLI can log or ignore.
@@ -135,7 +136,6 @@ impl SyncChannels {
 
 // ── App State ───────────────────────────────────────────────────────────────
 
-#[derive(Clone)]
 pub struct AppState {
     pub api: Arc<RwLock<ApiClient>>,
     pub sync_handles: Arc<Mutex<SyncHandles>>,
@@ -148,10 +148,27 @@ pub struct AppState {
     pub extra_bin_dirs: Arc<std::sync::RwLock<Vec<PathBuf>>>,
     /// Optional callback for sync progress events.
     pub on_progress: Arc<std::sync::OnceLock<ProgressEmitter>>,
+    /// Platform-agnostic key-value store for credentials and settings.
+    pub store: Arc<dyn ConfigStore>,
+}
+
+impl Clone for AppState {
+    fn clone(&self) -> Self {
+        Self {
+            api: self.api.clone(),
+            sync_handles: self.sync_handles.clone(),
+            sync_channels: self.sync_channels.clone(),
+            cancelled_feeds: self.cancelled_feeds.clone(),
+            cached_limits: self.cached_limits.clone(),
+            extra_bin_dirs: self.extra_bin_dirs.clone(),
+            on_progress: self.on_progress.clone(),
+            store: self.store.clone(),
+        }
+    }
 }
 
 impl AppState {
-    pub fn new(base_url: &str) -> Self {
+    pub fn new(base_url: &str, store: Arc<dyn ConfigStore>) -> Self {
         Self {
             api: Arc::new(RwLock::new(ApiClient::new(base_url, None))),
             sync_handles: Arc::new(Mutex::new(SyncHandles {
@@ -164,6 +181,7 @@ impl AppState {
             cached_limits: Arc::new(RwLock::new(None)),
             extra_bin_dirs: Arc::new(std::sync::RwLock::new(Vec::new())),
             on_progress: Arc::new(std::sync::OnceLock::new()),
+            store,
         }
     }
 }

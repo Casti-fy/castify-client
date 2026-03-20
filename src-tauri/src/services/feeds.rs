@@ -1,5 +1,3 @@
-use tauri::{AppHandle, Manager};
-
 use crate::error::AppError;
 use crate::models::{CreateFeedRequest, CreateFeedResponse, Feed, FeedDetailResponse, UpdateFeedRequest};
 use crate::state::AppState;
@@ -12,12 +10,11 @@ pub async fn fetch_all_feeds(state: &AppState) -> Result<Vec<Feed>, AppError> {
 }
 
 pub async fn create_feed(
-    app: &AppHandle,
+    state: &AppState,
     name: String,
     source_url: String,
     description: Option<String>,
 ) -> Result<CreateFeedResponse, AppError> {
-    let state = app.state::<AppState>();
     let body = CreateFeedRequest {
         name,
         source_url,
@@ -31,9 +28,9 @@ pub async fn create_feed(
 
     // Scan first episodes in background
     let feed = resp.feed.clone();
-    let app_clone = app.clone();
+    let state = state.clone();
     tokio::spawn(async move {
-        sync::scan_new_feed(&app_clone, &feed).await;
+        sync::scan_new_feed(&state, &feed).await;
     });
 
     Ok(resp)
@@ -71,11 +68,8 @@ pub async fn delete_feed(state: &AppState, feed_id: &str) -> Result<(), AppError
     api.request_no_content::<()>(&format!("/api/v1/feeds/{feed_id}"), "DELETE", None, true)
         .await?;
 
-    // Mark this feed as cancelled so workers skip any pending jobs for it.
-    {
-        let mut cancelled = state.cancelled_feeds.write().await;
-        cancelled.insert(feed_id.to_string());
-    }
+    let mut cancelled = state.cancelled_feeds.write().await;
+    cancelled.insert(feed_id.to_string());
 
     Ok(())
 }

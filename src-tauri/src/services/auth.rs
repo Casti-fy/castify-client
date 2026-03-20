@@ -1,19 +1,16 @@
 use std::collections::HashMap;
 
-use tauri::{AppHandle, Manager};
-
 use crate::error::AppError;
 use crate::models::{AuthResponse, LoginRequest, PlanLimits, RegisterRequest, User};
 use crate::state::AppState;
 
-use super::{keychain, sync};
+use super::sync;
 
 pub async fn login(
-    app: &AppHandle,
+    state: &AppState,
     email: String,
     password: String,
 ) -> Result<AuthResponse, AppError> {
-    let state = app.state::<AppState>();
     let api = state.api.read().await;
     let body = LoginRequest { email, password };
     let resp = api
@@ -21,16 +18,15 @@ pub async fn login(
         .await?;
     drop(api);
 
-    apply_auth(app, &resp).await;
+    apply_auth(state, &resp).await;
     Ok(resp)
 }
 
 pub async fn register(
-    app: &AppHandle,
+    state: &AppState,
     email: String,
     password: String,
 ) -> Result<AuthResponse, AppError> {
-    let state = app.state::<AppState>();
     let api = state.api.read().await;
     let body = RegisterRequest { email, password };
     let resp = api
@@ -38,24 +34,23 @@ pub async fn register(
         .await?;
     drop(api);
 
-    apply_auth(app, &resp).await;
+    apply_auth(state, &resp).await;
     Ok(resp)
 }
 
 /// Save token, update cached limits, and auto-start sync after successful auth.
-async fn apply_auth(app: &AppHandle, resp: &AuthResponse) {
-    let state = app.state::<AppState>();
+async fn apply_auth(state: &AppState, resp: &AuthResponse) {
     state
         .api
         .write()
         .await
         .set_token(Some(resp.token.clone()));
-    let _ = keychain::save_token(app, &resp.token);
+    let _ = state.store.save_token(&resp.token);
     *state.cached_limits.write().await = Some(resp.user.limits.clone());
 
-    let handle = app.clone();
+    let state = state.clone();
     tokio::spawn(async move {
-        sync::auto_start_sync(&handle).await;
+        sync::auto_start_sync(&state).await;
     });
 }
 
@@ -74,11 +69,10 @@ pub async fn fetch_plans(state: &AppState) -> Result<HashMap<String, PlanLimits>
         .await
 }
 
-pub async fn logout(app: &AppHandle) -> Result<(), AppError> {
-    let state = app.state::<AppState>();
+pub async fn logout(state: &AppState) -> Result<(), AppError> {
     state.api.write().await.set_token(None);
     *state.cached_limits.write().await = None;
-    let _ = keychain::delete_token(app);
-    sync::stop_periodic_sync(app.clone()).await?;
+    let _ = state.store.delete_token();
+    sync::stop_periodic_sync(state).await?;
     Ok(())
 }

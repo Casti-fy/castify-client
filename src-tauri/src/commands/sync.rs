@@ -1,24 +1,28 @@
 use std::fs;
 use std::path::PathBuf;
 
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
 use crate::error::AppError;
 use crate::services::sync as sync_service;
+use crate::state::AppState;
 
 #[tauri::command]
 pub async fn sync_feed(app: AppHandle, feed_id: String) -> Result<(), AppError> {
-    sync_service::sync_single_feed(&app, &feed_id).await
+    let state = app.state::<AppState>();
+    sync_service::sync_single_feed(&state, &feed_id).await
 }
 
 #[tauri::command]
 pub async fn get_sync_interval(app: AppHandle) -> Result<u64, AppError> {
-    Ok(sync_service::read_sync_interval(&app))
+    let state = app.state::<AppState>();
+    Ok(sync_service::read_sync_interval(&state))
 }
 
 #[tauri::command]
 pub async fn set_sync_interval(app: AppHandle, minutes: u64) -> Result<(), AppError> {
-    sync_service::write_sync_interval(&app, minutes);
+    let state = app.state::<AppState>();
+    sync_service::write_sync_interval(&state, minutes);
     Ok(())
 }
 
@@ -26,7 +30,6 @@ pub async fn set_sync_interval(app: AppHandle, minutes: u64) -> Result<(), AppEr
 pub async fn clear_sync_cache() -> Result<(), AppError> {
     let tmp_dir = std::env::temp_dir();
 
-    // Remove all temp dirs of the form castify-<feed_id>
     if let Ok(entries) = fs::read_dir(&tmp_dir) {
         for entry in entries.flatten() {
             let path: PathBuf = entry.path();

@@ -18,7 +18,8 @@ pub async fn create_feed(
     source_url: String,
     description: Option<String>,
 ) -> Result<CreateFeedResponse, AppError> {
-    feeds_service::create_feed(&app, name, source_url, description).await
+    let state = app.state::<AppState>();
+    feeds_service::create_feed(&state, name, source_url, description).await
 }
 
 #[tauri::command]

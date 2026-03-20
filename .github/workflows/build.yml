@@ -154,6 +154,9 @@ jobs:
         shell: bash
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
           DMG=$(find src-tauri/target -name '*.dmg' -not -name '*.sig' -type f | head -1)
@@ -164,11 +167,15 @@ jobs:
           fi
           echo "==> Found $DMG"
 
-          # Mount DMG and copy .app out (DMG is read-only)
+          # Mount DMG and copy contents out (DMG is read-only)
           MOUNT_DIR=$(mktemp -d)
           WORK_DIR=$(mktemp -d)
           hdiutil attach "$DMG" -mountpoint "$MOUNT_DIR" -nobrowse -quiet
           cp -R "$MOUNT_DIR/Castify.app" "$WORK_DIR/"
+          # Preserve the Applications symlink for drag-to-install
+          if [ -L "$MOUNT_DIR/Applications" ]; then
+            ln -s /Applications "$WORK_DIR/Applications"
+          fi
           hdiutil detach "$MOUNT_DIR" -quiet
 
           APP="$WORK_DIR/Castify.app"
@@ -189,15 +196,23 @@ jobs:
             --sign "$APPLE_SIGNING_IDENTITY" \
             "$APP"
 
-          # Recreate the DMG
+          # Recreate the DMG with same layout
           echo "==> Recreating DMG at $DMG..."
           rm -f "$DMG"
           hdiutil create -volname "Castify" -srcfolder "$WORK_DIR" \
             -ov -format UDZO "$DMG"
-          echo "==> DMG recreated: $(du -h "$DMG" | cut -f1)"
 
+          # Re-notarize the new DMG (re-signing invalidated the original notarization)
+          echo "==> Notarizing DMG..."
+          xcrun notarytool submit "$DMG" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+          xcrun stapler staple "$DMG"
+
+          echo "==> DMG recreated and notarized: $(du -h "$DMG" | cut -f1)"
           rm -rf "$WORK_DIR" "$MOUNT_DIR"
-          echo "==> Done"
 
       # Repack AppImage with fuse3-compatible runtime so it works on
       # modern distros (Debian 13+, Fedora 40+) without libfuse2.

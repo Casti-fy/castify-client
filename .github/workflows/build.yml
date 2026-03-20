@@ -145,10 +145,10 @@ jobs:
         with:
           args: ${{ matrix.args }}
 
-      # Tauri re-signs all binaries inside the .app bundle but strips our
-      # custom entitlements from the yt-dlp sidecar. Tauri then cleans up
-      # the .app and leaves only .app.tar.gz. Extract it, re-sign yt-dlp
-      # with disable-library-validation, re-seal the .app, and repackage.
+      # Tauri re-signs all binaries inside the .app but strips our custom
+      # entitlements from yt-dlp. Tauri then deletes the .app and only
+      # leaves the DMG. Mount the DMG, copy .app out, re-sign yt-dlp with
+      # disable-library-validation, re-seal the .app, and recreate the DMG.
       - name: Re-sign yt-dlp sidecar with entitlements (macOS)
         if: startsWith(matrix.platform, 'macos')
         shell: bash
@@ -156,24 +156,22 @@ jobs:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: |
           set -euo pipefail
-          TARBALL=$(find src-tauri/target -name 'Castify.app.tar.gz' -not -name '*.sig' -type f | head -1)
-          if [ -z "$TARBALL" ]; then
-            echo "ERROR: Castify.app.tar.gz not found"
+          DMG=$(find src-tauri/target -name '*.dmg' -not -name '*.sig' -type f | head -1)
+          if [ -z "$DMG" ]; then
+            echo "ERROR: DMG not found"
             find src-tauri/target -name 'Castify*' -type f 2>/dev/null || true
             exit 1
           fi
-          BUNDLE_DIR="$(dirname "$TARBALL")"
-          echo "==> Found $TARBALL"
+          echo "==> Found $DMG"
 
-          # Extract .app from tarball
-          tar xzf "$TARBALL" -C "$BUNDLE_DIR"
-          APP="$BUNDLE_DIR/Castify.app"
-          if [ ! -d "$APP" ]; then
-            echo "ERROR: Castify.app not found after extraction"
-            ls -la "$BUNDLE_DIR"
-            exit 1
-          fi
+          # Mount DMG and copy .app out (DMG is read-only)
+          MOUNT_DIR=$(mktemp -d)
+          WORK_DIR=$(mktemp -d)
+          hdiutil attach "$DMG" -mountpoint "$MOUNT_DIR" -nobrowse -quiet
+          cp -R "$MOUNT_DIR/Castify.app" "$WORK_DIR/"
+          hdiutil detach "$MOUNT_DIR" -quiet
 
+          APP="$WORK_DIR/Castify.app"
           YTDLP="$APP/Contents/MacOS/yt-dlp"
           ENT="src-tauri/entitlements/yt-dlp.plist"
 
@@ -191,22 +189,14 @@ jobs:
             --sign "$APPLE_SIGNING_IDENTITY" \
             "$APP"
 
-          # Repackage the tarball
-          echo "==> Repackaging $TARBALL..."
-          rm -f "$TARBALL"
-          tar czf "$TARBALL" -C "$BUNDLE_DIR" Castify.app
+          # Recreate the DMG
+          echo "==> Recreating DMG at $DMG..."
+          rm -f "$DMG"
+          hdiutil create -volname "Castify" -srcfolder "$WORK_DIR" \
+            -ov -format UDZO "$DMG"
+          echo "==> DMG recreated: $(du -h "$DMG" | cut -f1)"
 
-          # Also create/update the DMG if one exists
-          DMG=$(find "$(dirname "$BUNDLE_DIR")" -name '*.dmg' -type f 2>/dev/null | head -1)
-          if [ -n "$DMG" ]; then
-            echo "==> Recreating DMG..."
-            rm -f "$DMG"
-            hdiutil create -volname "Castify" -srcfolder "$APP" \
-              -ov -format UDZO "$DMG"
-            echo "==> DMG recreated: $(du -h "$DMG" | cut -f1)"
-          fi
-
-          rm -rf "$APP"
+          rm -rf "$WORK_DIR" "$MOUNT_DIR"
           echo "==> Done"
 
       # Repack AppImage with fuse3-compatible runtime so it works on

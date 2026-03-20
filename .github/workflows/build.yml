@@ -133,34 +133,6 @@ jobs:
           security list-keychain -d user -s "$KEYCHAIN_PATH"
           rm certificate.p12
 
-      - name: Codesign yt-dlp sidecar (macOS)
-        if: startsWith(matrix.platform, 'macos')
-        shell: bash
-        env:
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-        run: |
-          set -euo pipefail
-          BIN="src-tauri/binaries/yt-dlp-${{ matrix.target }}"
-          ENT="src-tauri/entitlements/yt-dlp.plist"
-          if [ ! -f "$BIN" ]; then
-            echo "ERROR: missing sidecar $BIN"
-            ls -la src-tauri/binaries || true
-            exit 1
-          fi
-          if [ ! -f "$ENT" ]; then
-            echo "ERROR: missing entitlements $ENT"
-            exit 1
-          fi
-          if [ -z "${APPLE_SIGNING_IDENTITY:-}" ]; then
-            echo "ERROR: APPLE_SIGNING_IDENTITY is empty"
-            exit 1
-          fi
-          codesign --force --options runtime \
-            --entitlements "$ENT" \
-            --sign "$APPLE_SIGNING_IDENTITY" \
-            "$BIN"
-          codesign -dv --entitlements :- "$BIN" || true
-
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
@@ -172,6 +144,53 @@ jobs:
           APPLE_TEAM_ID: ${{ startsWith(matrix.platform, 'macos') && secrets.APPLE_TEAM_ID || '' }}
         with:
           args: ${{ matrix.args }}
+
+      # Tauri re-signs all binaries inside the .app bundle but strips our
+      # custom entitlements from the yt-dlp sidecar. Re-sign yt-dlp with
+      # disable-library-validation so its embedded Python.framework can load
+      # (different Team ID). Then re-sign the .app and recreate the DMG.
+      - name: Re-sign yt-dlp sidecar with entitlements (macOS)
+        if: startsWith(matrix.platform, 'macos')
+        shell: bash
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          set -euo pipefail
+          APP=$(find src-tauri/target -name 'Castify.app' -type d | head -1)
+          if [ -z "$APP" ]; then
+            echo "ERROR: Castify.app not found"
+            exit 1
+          fi
+          echo "==> Found $APP"
+
+          YTDLP="$APP/Contents/MacOS/yt-dlp"
+          ENT="src-tauri/entitlements/yt-dlp.plist"
+
+          # Re-sign yt-dlp with disable-library-validation entitlement
+          echo "==> Re-signing yt-dlp with entitlements..."
+          codesign --force --options runtime \
+            --entitlements "$ENT" \
+            --sign "$APPLE_SIGNING_IDENTITY" \
+            "$YTDLP"
+          codesign -dv --entitlements :- "$YTDLP"
+
+          # Re-sign the .app (without --deep) to update the code seal
+          # --deep would recursively re-sign yt-dlp and strip our entitlements
+          echo "==> Re-signing Castify.app..."
+          codesign --force --options runtime \
+            --sign "$APPLE_SIGNING_IDENTITY" \
+            "$APP"
+
+          # Recreate the DMG
+          DMG=$(find src-tauri/target -name '*.dmg' -type f | head -1)
+          if [ -n "$DMG" ]; then
+            echo "==> Recreating DMG at $DMG..."
+            BUNDLE_DIR="$(dirname "$APP")"
+            rm -f "$DMG"
+            hdiutil create -volname "Castify" -srcfolder "$BUNDLE_DIR" \
+              -ov -format UDZO "$DMG"
+            echo "==> DMG recreated: $(du -h "$DMG" | cut -f1)"
+          fi
 
       # Repack AppImage with fuse3-compatible runtime so it works on
       # modern distros (Debian 13+, Fedora 40+) without libfuse2.

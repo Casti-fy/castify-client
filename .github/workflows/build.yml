@@ -146,9 +146,9 @@ jobs:
           args: ${{ matrix.args }}
 
       # Tauri re-signs all binaries inside the .app bundle but strips our
-      # custom entitlements from the yt-dlp sidecar. Re-sign yt-dlp with
-      # disable-library-validation so its embedded Python.framework can load
-      # (different Team ID). Then re-sign the .app and recreate the DMG.
+      # custom entitlements from the yt-dlp sidecar. Tauri then cleans up
+      # the .app and leaves only .app.tar.gz. Extract it, re-sign yt-dlp
+      # with disable-library-validation, re-seal the .app, and repackage.
       - name: Re-sign yt-dlp sidecar with entitlements (macOS)
         if: startsWith(matrix.platform, 'macos')
         shell: bash
@@ -156,12 +156,23 @@ jobs:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: |
           set -euo pipefail
-          APP=$(find src-tauri/target -name 'Castify.app' -type d | head -1)
-          if [ -z "$APP" ]; then
-            echo "ERROR: Castify.app not found"
+          TARBALL=$(find src-tauri/target -name 'Castify.app.tar.gz' -not -name '*.sig' -type f | head -1)
+          if [ -z "$TARBALL" ]; then
+            echo "ERROR: Castify.app.tar.gz not found"
+            find src-tauri/target -name 'Castify*' -type f 2>/dev/null || true
             exit 1
           fi
-          echo "==> Found $APP"
+          BUNDLE_DIR="$(dirname "$TARBALL")"
+          echo "==> Found $TARBALL"
+
+          # Extract .app from tarball
+          tar xzf "$TARBALL" -C "$BUNDLE_DIR"
+          APP="$BUNDLE_DIR/Castify.app"
+          if [ ! -d "$APP" ]; then
+            echo "ERROR: Castify.app not found after extraction"
+            ls -la "$BUNDLE_DIR"
+            exit 1
+          fi
 
           YTDLP="$APP/Contents/MacOS/yt-dlp"
           ENT="src-tauri/entitlements/yt-dlp.plist"
@@ -175,22 +186,28 @@ jobs:
           codesign -dv --entitlements :- "$YTDLP"
 
           # Re-sign the .app (without --deep) to update the code seal
-          # --deep would recursively re-sign yt-dlp and strip our entitlements
           echo "==> Re-signing Castify.app..."
           codesign --force --options runtime \
             --sign "$APPLE_SIGNING_IDENTITY" \
             "$APP"
 
-          # Recreate the DMG
-          DMG=$(find src-tauri/target -name '*.dmg' -type f | head -1)
+          # Repackage the tarball
+          echo "==> Repackaging $TARBALL..."
+          rm -f "$TARBALL"
+          tar czf "$TARBALL" -C "$BUNDLE_DIR" Castify.app
+
+          # Also create/update the DMG if one exists
+          DMG=$(find "$(dirname "$BUNDLE_DIR")" -name '*.dmg' -type f 2>/dev/null | head -1)
           if [ -n "$DMG" ]; then
-            echo "==> Recreating DMG at $DMG..."
-            BUNDLE_DIR="$(dirname "$APP")"
+            echo "==> Recreating DMG..."
             rm -f "$DMG"
-            hdiutil create -volname "Castify" -srcfolder "$BUNDLE_DIR" \
+            hdiutil create -volname "Castify" -srcfolder "$APP" \
               -ov -format UDZO "$DMG"
             echo "==> DMG recreated: $(du -h "$DMG" | cut -f1)"
           fi
+
+          rm -rf "$APP"
+          echo "==> Done"
 
       # Repack AppImage with fuse3-compatible runtime so it works on
       # modern distros (Debian 13+, Fedora 40+) without libfuse2.

@@ -36,6 +36,15 @@
       "binaries/ffmpeg",
       "binaries/deno"
     ],
+    "linux": {
+      "deb": {
+        "depends": [
+          "libwebkit2gtk-4.1-0 | libwebkit2gtk-4.1-0t64",
+          "libgtk-3-0 | libgtk-3-0t64",
+          "libayatana-appindicator3-1 | libappindicator3-1"
+        ]
+      }
+    },
     "windows": {
       "nsis": {
         "installMode": "both"

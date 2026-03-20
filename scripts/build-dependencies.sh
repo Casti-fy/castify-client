@@ -369,6 +369,7 @@ if [ "$BUILD_FFMPEG" = true ]; then
                         "${COMMON_FLAGS[@]}" \
                         --arch=x86_64 \
                         --target-os=mingw64 \
+                        --extra-ldflags="-static" \
                         "${CONFIGURE_EXTRA[@]}" \
                         --prefix="$INSTALL_DIR"
                     ;;

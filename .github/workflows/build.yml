@@ -32,6 +32,9 @@ jobs:
           - platform: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             args: --target x86_64-unknown-linux-gnu
+          - platform: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            args: --target aarch64-unknown-linux-gnu
 
     runs-on: ${{ matrix.platform }}
 
@@ -56,12 +59,17 @@ jobs:
 
       # Linux: WebKitGTK, Tauri system deps, and build tools for ffmpeg
       - name: Install Linux dependencies
-        if: matrix.platform == 'ubuntu-22.04'
+        if: contains(matrix.platform, 'ubuntu')
         run: |
           sudo apt-get update
+          # libappindicator3-dev was renamed to libayatana-appindicator3-dev on 24.04+
+          APPINDICATOR="libappindicator3-dev"
+          if ! apt-cache show libappindicator3-dev &>/dev/null; then
+            APPINDICATOR="libayatana-appindicator3-dev"
+          fi
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
+            "$APPINDICATOR" \
             librsvg2-dev \
             patchelf \
             libgtk-3-dev \
@@ -168,7 +176,7 @@ jobs:
       # Repack AppImage with fuse3-compatible runtime so it works on
       # modern distros (Debian 13+, Fedora 40+) without libfuse2.
       - name: Repack AppImage (no libfuse2 dependency)
-        if: matrix.platform == 'ubuntu-22.04'
+        if: contains(matrix.platform, 'ubuntu')
         shell: bash
         run: |
           set -euo pipefail
@@ -179,16 +187,17 @@ jobs:
           fi
           echo "==> Repacking $APPIMAGE with fuse3-compatible runtime..."
 
-          # Download latest appimagetool (ships fuse3/no-fuse runtime)
+          # Detect host arch for appimagetool download
+          HOST_ARCH="$(uname -m)"
           curl -fSL -o /tmp/appimagetool \
-            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+            "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${HOST_ARCH}.AppImage"
           chmod +x /tmp/appimagetool
 
           # Extract the original AppImage
           "$APPIMAGE" --appimage-extract
 
           # Repack with the new runtime
-          ARCH=x86_64 /tmp/appimagetool --appimage-extract-and-run squashfs-root "$APPIMAGE"
+          ARCH="$HOST_ARCH" /tmp/appimagetool --appimage-extract-and-run squashfs-root "$APPIMAGE"
           rm -rf squashfs-root
 
           echo "==> Repacked AppImage: $(du -h "$APPIMAGE" | cut -f1)"
@@ -242,4 +251,5 @@ jobs:
             | macOS (Apple Silicon) | `.dmg` (aarch64) |
             | macOS (Intel) | `.dmg` (x64) |
             | Windows 10+ | `.exe` (NSIS installer) |
-            | Linux | `.deb` or `.AppImage` |
+            | Linux (x86_64) | `.deb` or `.AppImage` (amd64) |
+            | Linux (ARM64) | `.deb` or `.AppImage` (arm64) |

@@ -162,8 +162,10 @@ async fn run_sidecar(
     let mut cmd = tokio::process::Command::new(&bin_path);
     cmd.args(&args);
 
-    // On Windows, prevent a visible console window from flashing for each
-    // spawned sidecar process (yt-dlp, ffmpeg, deno).
+    // On Windows, every console-subsystem EXE (/SUBSYSTEM:CONSOLE) gets a
+    // new console window allocated by the OS when spawned from a GUI process.
+    // CREATE_NO_WINDOW tells CreateProcess() to skip that allocation so our
+    // sidecars (yt-dlp, ffmpeg, deno) run headless without flashing a cmd.exe.
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;

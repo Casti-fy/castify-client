@@ -28,6 +28,23 @@ pub fn run() {
         ))
         .manage(AppState::new(DEFAULT_SERVER_URL))
         .setup(|app| {
+            // Wire Tauri's event emitter to AppState so services can emit
+            // progress events without depending on Tauri directly.
+            {
+                use tauri::Emitter;
+                let handle = app.handle().clone();
+                let state = app.state::<AppState>();
+                let _ = state.on_progress.set(std::sync::Arc::new(move |event| {
+                    let _ = handle.emit("sync-progress", event);
+                }));
+            }
+
+            // Set Tauri's resource dir as an extra binary search path
+            if let Ok(dir) = app.path().resource_dir() {
+                let state = app.state::<AppState>();
+                state.extra_bin_dirs.write().unwrap().push(dir);
+            }
+
             // Restore token from store
             if let Ok(token) = crate::services::keychain::get_token(app.handle()) {
                 // TODO: Should check if the token expired and request a new one?

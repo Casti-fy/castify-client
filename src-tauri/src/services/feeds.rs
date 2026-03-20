@@ -6,8 +6,7 @@ use crate::state::AppState;
 
 use super::sync;
 
-pub async fn fetch_all_feeds(app: &AppHandle) -> Result<Vec<Feed>, AppError> {
-    let state = app.state::<AppState>();
+pub async fn fetch_all_feeds(state: &AppState) -> Result<Vec<Feed>, AppError> {
     let api = state.api.read().await;
     api.request::<Vec<Feed>>("/api/v1/feeds", "GET", true).await
 }
@@ -41,21 +40,19 @@ pub async fn create_feed(
 }
 
 pub async fn fetch_feed_detail(
-    app: &AppHandle,
+    state: &AppState,
     feed_id: &str,
 ) -> Result<FeedDetailResponse, AppError> {
-    let state = app.state::<AppState>();
     let api = state.api.read().await;
     api.request::<FeedDetailResponse>(&format!("/api/v1/feeds/{feed_id}"), "GET", true)
         .await
 }
 
 pub async fn update_feed_artwork(
-    app: &AppHandle,
+    state: &AppState,
     feed_id: &str,
     artwork_url: &str,
 ) -> Result<(), AppError> {
-    let state = app.state::<AppState>();
     let body = UpdateFeedRequest {
         artwork_url: Some(artwork_url.to_string()),
     };
@@ -69,8 +66,7 @@ pub async fn update_feed_artwork(
     .await
 }
 
-pub async fn delete_feed(app: &AppHandle, feed_id: &str) -> Result<(), AppError> {
-    let state = app.state::<AppState>();
+pub async fn delete_feed(state: &AppState, feed_id: &str) -> Result<(), AppError> {
     let api = state.api.read().await;
     api.request_no_content::<()>(&format!("/api/v1/feeds/{feed_id}"), "DELETE", None, true)
         .await?;

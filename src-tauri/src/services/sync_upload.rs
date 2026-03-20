@@ -2,8 +2,6 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
-use tauri::{AppHandle, Manager};
-
 use crate::error::AppError;
 use crate::models::UploadURLResponse;
 use crate::services::{episode as episode_service, helpers, uploader};
@@ -17,7 +15,7 @@ fn upload_backoff_secs(attempt: u32) -> u64 {
     (2u64.saturating_pow(attempt.saturating_sub(1))).min(45)
 }
 
-async fn process_upload(app: &AppHandle, job: Job) -> Result<(), AppError> {
+async fn process_upload(state: &AppState, job: Job) -> Result<(), AppError> {
     let feed_id = &job.feed_id;
     let episode_id = &job.episode_id;
 
@@ -29,12 +27,12 @@ async fn process_upload(app: &AppHandle, job: Job) -> Result<(), AppError> {
             "Audio file missing for {}, marking failed",
             job.episode_title
         );
-        let _ = episode_service::update_status(app, episode_id, "failed", None).await;
+        let _ = episode_service::update_status(state, episode_id, "failed", None).await;
         return Ok(());
     }
 
     helpers::emit_progress(
-        app,
+        state,
         feed_id,
         &job.feed_name,
         "upload",
@@ -43,7 +41,7 @@ async fn process_upload(app: &AppHandle, job: Job) -> Result<(), AppError> {
 
     for attempt in 1..=UPLOAD_MAX_ATTEMPTS {
         let url_resp: UploadURLResponse =
-            match episode_service::get_upload_url(app, episode_id).await {
+            match episode_service::get_upload_url(state, episode_id).await {
                 Ok(r) => r,
                 Err(e) => {
                     if attempt > 1 {
@@ -63,7 +61,7 @@ async fn process_upload(app: &AppHandle, job: Job) -> Result<(), AppError> {
                     } else {
                         log::warn!("Failed to get upload URL for {}: {e}", job.episode_title);
                     }
-                    let _ = episode_service::update_status(app, episode_id, "failed", None).await;
+                    let _ = episode_service::update_status(state, episode_id, "failed", None).await;
                     return Ok(());
                 }
             };
@@ -81,10 +79,10 @@ async fn process_upload(app: &AppHandle, job: Job) -> Result<(), AppError> {
                     .await
                     .map(|m| m.len())
                     .unwrap_or(0);
-                let _ = episode_service::update_status(app, episode_id, "ready", Some(file_size))
+                let _ = episode_service::update_status(state, episode_id, "ready", Some(file_size))
                     .await;
                 helpers::emit_progress(
-                    app,
+                    state,
                     feed_id,
                     &job.feed_name,
                     "complete",
@@ -106,7 +104,7 @@ async fn process_upload(app: &AppHandle, job: Job) -> Result<(), AppError> {
                     continue;
                 }
                 log::warn!("Upload failed for {}: {e}", job.episode_title);
-                let _ = episode_service::update_status(app, episode_id, "failed", None).await;
+                let _ = episode_service::update_status(state, episode_id, "failed", None).await;
                 return Ok(());
             }
         }
@@ -115,7 +113,7 @@ async fn process_upload(app: &AppHandle, job: Job) -> Result<(), AppError> {
     Ok(())
 }
 
-pub async fn start_upload_worker(app: AppHandle, mut channels: ChannelReceivers) {
+pub async fn start_upload_worker(state: AppState, mut channels: ChannelReceivers) {
     let max_concurrent = helpers::cpu_count() / 2;
     let semaphore = Arc::new(tokio::sync::Semaphore::new(max_concurrent));
     let mut seen: HashSet<String> = HashSet::new();
@@ -132,17 +130,8 @@ pub async fn start_upload_worker(app: AppHandle, mut channels: ChannelReceivers)
             }
         };
 
-        // Skip jobs for feeds that have been deleted.
-        {
-            let state = app.state::<AppState>();
-            if state
-                .cancelled_feeds
-                .read()
-                .await
-                .contains(&job.feed_id)
-            {
-                continue;
-            }
+        if state.cancelled_feeds.read().await.contains(&job.feed_id) {
+            continue;
         }
 
         if !seen.insert(job.episode_id.clone()) {
@@ -153,13 +142,13 @@ pub async fn start_upload_worker(app: AppHandle, mut channels: ChannelReceivers)
         }
 
         let sem = semaphore.clone();
-        let app = app.clone();
+        let state = state.clone();
         let job_for_task = job.clone();
 
         let permit = sem.acquire_owned().await.unwrap();
         tokio::spawn(async move {
             let _permit = permit;
-            if let Err(e) = process_upload(&app, job_for_task.clone()).await {
+            if let Err(e) = process_upload(&state, job_for_task.clone()).await {
                 log::warn!(
                     "Upload job failed (episode {}): {e}",
                     job_for_task.episode_id
@@ -168,4 +157,3 @@ pub async fn start_upload_worker(app: AppHandle, mut channels: ChannelReceivers)
         });
     }
 }
-

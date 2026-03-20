@@ -3,7 +3,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use rand::Rng;
-use tauri::{AppHandle, Manager};
 
 use crate::error::AppError;
 use crate::services::{episode as episode_service, extractor, helpers};
@@ -11,7 +10,7 @@ use crate::state::{AppState, ChannelReceivers, Job, Priority};
 
 const SEEN_CAP: usize = 1000;
 
-pub async fn start_download_worker(app: AppHandle, mut channels: ChannelReceivers) {
+pub async fn start_download_worker(state: AppState, mut channels: ChannelReceivers) {
     let max_concurrent = helpers::cpu_count().clamp(2, 4);
     let semaphore = Arc::new(tokio::sync::Semaphore::new(max_concurrent));
     let mut seen: HashSet<String> = HashSet::new();
@@ -28,21 +27,10 @@ pub async fn start_download_worker(app: AppHandle, mut channels: ChannelReceiver
             }
         };
 
-        // Skip jobs for feeds that have been deleted.
-        if app
-            .app_handle()
-            .state::<AppState>()
-            .cancelled_feeds
-            .read()
-            .await
-            .contains(&job.feed_id)
-        {
+        if state.cancelled_feeds.read().await.contains(&job.feed_id) {
             continue;
         }
 
-        // De-dupe by (feed_id, video_id) since multiple episodes can point to the same
-        // underlying media ID (e.g. SoundCloud track id). Running two yt-dlp downloads
-        // into the same temp dir with the same output template can race on fragment files.
         let seen_key = format!("{}:{}", job.feed_id, job.video_id);
         if !seen.insert(seen_key) {
             continue;
@@ -52,7 +40,7 @@ pub async fn start_download_worker(app: AppHandle, mut channels: ChannelReceiver
         }
 
         let sem = semaphore.clone();
-        let app = app.clone();
+        let state = state.clone();
         let job_priority = job.priority;
         let job_for_task = job.clone();
 
@@ -65,14 +53,14 @@ pub async fn start_download_worker(app: AppHandle, mut channels: ChannelReceiver
                 tokio::time::sleep(Duration::from_secs(delay)).await;
             }
 
-            if let Err(e) = process_download(&app, job_for_task).await {
+            if let Err(e) = process_download(&state, job_for_task).await {
                 log::warn!("Download job failed (episode {}): {e}", job.episode_id);
             }
         });
     }
 }
 
-async fn process_download(app: &AppHandle, job: Job) -> Result<(), AppError> {
+async fn process_download(state: &AppState, job: Job) -> Result<(), AppError> {
     let feed_id = &job.feed_id;
     let episode_id = &job.episode_id;
 
@@ -87,28 +75,22 @@ async fn process_download(app: &AppHandle, job: Job) -> Result<(), AppError> {
 
     if audio_path.exists() {
         log::info!("Already downloaded locally: {}", job.episode_title);
-        let _ = episode_service::update_status(app, episode_id, "uploading", None).await;
-        let state = app.state::<AppState>();
+        let _ = episode_service::update_status(state, episode_id, "uploading", None).await;
         state.sync_channels.send_upload(job).await;
         return Ok(());
     }
 
-    // Optional: we could still backfill metadata here using ep_url without needing feed_detail,
-    // but to keep backend/API pressure minimal, we skip it in this refactor.
-
     helpers::emit_progress(
-        app,
+        state,
         feed_id,
         &job.feed_name,
         "download",
         &format!("Downloading: {}", job.episode_title),
     );
 
-    match extractor::download_audio(app, &ep_url, &job.video_id, &temp_dir).await {
+    match extractor::download_audio(state, &ep_url, &job.video_id, &temp_dir).await {
         Ok(_) => {
-            let _ = episode_service::update_status(app, episode_id, "uploading", None).await;
-
-            let state = app.state::<AppState>();
+            let _ = episode_service::update_status(state, episode_id, "uploading", None).await;
             state.sync_channels.send_upload(job).await;
         }
         Err(e) => {
@@ -117,13 +99,10 @@ async fn process_download(app: &AppHandle, job: Job) -> Result<(), AppError> {
                 log::info!("Skipping premiere, will retry later: {}", job.episode_title);
             } else {
                 log::warn!("Download failed for {}: {e}", job.episode_title);
-                let _ = episode_service::update_status(app, episode_id, "failed", None).await;
+                let _ = episode_service::update_status(state, episode_id, "failed", None).await;
             }
         }
     }
 
     Ok(())
 }
-
-
-

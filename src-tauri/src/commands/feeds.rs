@@ -1,12 +1,14 @@
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
 use crate::error::AppError;
 use crate::models::{CreateFeedResponse, Feed, FeedDetailResponse};
 use crate::services::feeds as feeds_service;
+use crate::state::AppState;
 
 #[tauri::command]
 pub async fn list_feeds(app: AppHandle) -> Result<Vec<Feed>, AppError> {
-    feeds_service::fetch_all_feeds(&app).await
+    let state = app.state::<AppState>();
+    feeds_service::fetch_all_feeds(&state).await
 }
 
 #[tauri::command]
@@ -24,10 +26,12 @@ pub async fn get_feed_detail(
     app: AppHandle,
     feed_id: String,
 ) -> Result<FeedDetailResponse, AppError> {
-    feeds_service::fetch_feed_detail(&app, &feed_id).await
+    let state = app.state::<AppState>();
+    feeds_service::fetch_feed_detail(&state, &feed_id).await
 }
 
 #[tauri::command]
 pub async fn delete_feed(app: AppHandle, feed_id: String) -> Result<(), AppError> {
-    feeds_service::delete_feed(&app, &feed_id).await
+    let state = app.state::<AppState>();
+    feeds_service::delete_feed(&state, &feed_id).await
 }

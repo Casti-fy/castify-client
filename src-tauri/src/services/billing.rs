@@ -1,5 +1,4 @@
 use serde::Deserialize;
-use tauri::{AppHandle, Manager};
 
 use crate::error::AppError;
 use crate::state::AppState;
@@ -15,11 +14,10 @@ struct PortalResponse {
 }
 
 pub async fn create_checkout(
-    app: &AppHandle,
+    state: &AppState,
     plan: String,
     interval: String,
 ) -> Result<String, AppError> {
-    let state = app.state::<AppState>();
     let body = serde_json::json!({ "plan": plan, "interval": interval });
     let resp: CheckoutResponse = state
         .api
@@ -30,8 +28,7 @@ pub async fn create_checkout(
     Ok(resp.checkout_url)
 }
 
-pub async fn create_portal(app: &AppHandle) -> Result<String, AppError> {
-    let state = app.state::<AppState>();
+pub async fn create_portal(state: &AppState) -> Result<String, AppError> {
     let resp: PortalResponse = state
         .api
         .read()

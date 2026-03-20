@@ -1,4 +1,5 @@
-use tauri::{AppHandle, Emitter};
+use crate::models::SyncProgressEvent;
+use crate::state::AppState;
 
 pub fn cpu_count() -> usize {
     std::thread::available_parallelism()
@@ -7,21 +8,20 @@ pub fn cpu_count() -> usize {
 }
 
 pub fn emit_progress(
-    app: &AppHandle,
+    state: &AppState,
     feed_id: &str,
     feed_name: &str,
     step: &str,
     message: &str,
 ) {
-    let _ = app.emit(
-        "sync-progress",
-        crate::models::SyncProgressEvent {
+    if let Some(emitter) = state.on_progress.get() {
+        emitter(SyncProgressEvent {
             feed_id: feed_id.to_string(),
             feed_name: feed_name.to_string(),
             step: step.to_string(),
             message: message.to_string(),
-        },
-    );
+        });
+    }
 }
 
 pub fn temp_dir_for_feed(feed_id: &str) -> std::path::PathBuf {

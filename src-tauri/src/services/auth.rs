@@ -59,8 +59,7 @@ async fn apply_auth(app: &AppHandle, resp: &AuthResponse) {
     });
 }
 
-pub async fn fetch_current_user(app: &AppHandle) -> Result<User, AppError> {
-    let state = app.state::<AppState>();
+pub async fn fetch_current_user(state: &AppState) -> Result<User, AppError> {
     let user = {
         let api = state.api.read().await;
         api.request::<User>("/api/v1/auth/me", "GET", true).await?
@@ -69,8 +68,7 @@ pub async fn fetch_current_user(app: &AppHandle) -> Result<User, AppError> {
     Ok(user)
 }
 
-pub async fn fetch_plans(app: &AppHandle) -> Result<HashMap<String, PlanLimits>, AppError> {
-    let state = app.state::<AppState>();
+pub async fn fetch_plans(state: &AppState) -> Result<HashMap<String, PlanLimits>, AppError> {
     let api = state.api.read().await;
     api.request::<HashMap<String, PlanLimits>>("/api/v1/plans", "GET", false)
         .await

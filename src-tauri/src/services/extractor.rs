@@ -1,12 +1,11 @@
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
-use tauri::{AppHandle, Manager};
-
 use crate::error::AppError;
 use crate::models::PlaylistEntry;
+use crate::state::AppState;
 
-fn prepend_sidecar_deno_to_path(app: &AppHandle) -> Option<(String, String)> {
+fn prepend_sidecar_deno_to_path(state: &AppState) -> Option<(String, String)> {
     // yt-dlp may use Deno for YouTube n-challenge solving.
     // We always ship `deno` as a sidecar, so prefer that deterministic runtime.
     let path_sep = if cfg!(windows) { ';' } else { ':' };
@@ -19,9 +18,8 @@ fn prepend_sidecar_deno_to_path(app: &AppHandle) -> Option<(String, String)> {
             sidecar_dirs.push(dir.to_path_buf());
         }
     }
-    let resource_dir = app.path().resource_dir().unwrap_or_default();
-    if !resource_dir.as_os_str().is_empty() {
-        sidecar_dirs.push(resource_dir);
+    if let Ok(dirs) = state.extra_bin_dirs.read() {
+        sidecar_dirs.extend(dirs.iter().cloned());
     }
 
     let target_triple = option_env!("TAURI_ENV_TARGET_TRIPLE").unwrap_or("");
@@ -59,17 +57,17 @@ fn prepend_sidecar_deno_to_path(app: &AppHandle) -> Option<(String, String)> {
     ))
 }
 
-fn maybe_deno_js_runtime_arg(app: &AppHandle) -> Option<String> {
+fn maybe_deno_js_runtime_arg(state: &AppState) -> Option<String> {
     // Prefer explicitly wiring Deno to yt-dlp so it can be used even if PATH resolution differs
     // between dev/prod packaging.
-    let deno_path = resolve_sidecar(app, "binaries/deno").ok()?;
+    let deno_path = resolve_sidecar(state, "binaries/deno").ok()?;
     Some(format!("deno:{}", deno_path.to_string_lossy()))
 }
 
-fn maybe_ffmpeg_location_args(app: &AppHandle) -> Vec<String> {
+fn maybe_ffmpeg_location_args(state: &AppState) -> Vec<String> {
     // Always point yt-dlp at the bundled ffmpeg directory so its postprocessors work
     // even when system ffmpeg isn't on PATH.
-    let Ok(ffmpeg_path) = resolve_sidecar(app, "binaries/ffmpeg") else {
+    let Ok(ffmpeg_path) = resolve_sidecar(state, "binaries/ffmpeg") else {
         return Vec::new();
     };
     let Some(dir) = ffmpeg_path.parent() else {
@@ -81,16 +79,16 @@ fn maybe_ffmpeg_location_args(app: &AppHandle) -> Vec<String> {
     ]
 }
 
-fn ytdlp_base_args(app: &AppHandle) -> Vec<String> {
+fn ytdlp_base_args(state: &AppState) -> Vec<String> {
     let mut args = Vec::new();
-    args.extend(maybe_ffmpeg_location_args(app));
+    args.extend(maybe_ffmpeg_location_args(state));
 
     // Download the EJS challenge solver so YouTube serves real formats.
     args.push("--remote-components".to_string());
     args.push("ejs:github".to_string());
 
     // Explicitly wire the bundled Deno runtime to yt-dlp's JS runtime system.
-    if let Some(runtime) = maybe_deno_js_runtime_arg(app) {
+    if let Some(runtime) = maybe_deno_js_runtime_arg(state) {
         args.push("--js-runtimes".to_string());
         args.push(runtime);
     }
@@ -99,7 +97,7 @@ fn ytdlp_base_args(app: &AppHandle) -> Vec<String> {
 }
 
 /// Resolve the absolute path of a sidecar binary.
-fn resolve_sidecar(app: &AppHandle, name: &str) -> Result<PathBuf, AppError> {
+fn resolve_sidecar(state: &AppState, name: &str) -> Result<PathBuf, AppError> {
     // In dev mode, sidecars are next to the built binary in target/debug/
     // In production, they are in the resource dir
     let exe_dir = std::env::current_exe()
@@ -134,12 +132,15 @@ fn resolve_sidecar(app: &AppHandle, name: &str) -> Result<PathBuf, AppError> {
         }
     }
 
-    // Try resource dir
-    let resource_dir = app.path().resource_dir().unwrap_or_default();
-    for exe_name in &candidates {
-        let candidate = resource_dir.join(exe_name);
-        if candidate.exists() {
-            return Ok(candidate);
+    // Try extra binary directories (GUI: Tauri resource dir; CLI: custom path)
+    if let Ok(dirs) = state.extra_bin_dirs.read() {
+        for dir in dirs.iter() {
+            for exe_name in &candidates {
+                let candidate = dir.join(exe_name);
+                if candidate.exists() {
+                    return Ok(candidate);
+                }
+            }
         }
     }
 
@@ -151,11 +152,11 @@ fn resolve_sidecar(app: &AppHandle, name: &str) -> Result<PathBuf, AppError> {
 
 /// Run a sidecar binary and collect stdout/stderr, returning (exit_code, stdout, stderr).
 async fn run_sidecar(
-    app: &AppHandle,
+    state: &AppState,
     name: &str,
     args: Vec<String>,
 ) -> Result<(i32, String, String), AppError> {
-    let bin_path = resolve_sidecar(app, name)?;
+    let bin_path = resolve_sidecar(state, name)?;
     let bin_name = bin_path.file_name().unwrap_or(name.as_ref()).to_string_lossy();
     log::info!("[sidecar] {} {}", bin_name, args.join(" "));
 
@@ -175,7 +176,7 @@ async fn run_sidecar(
 
     // Some sidecars (yt-dlp) may execute JS components (YouTube n-challenge solving),
     // so we prepend our bundled `deno` to PATH.
-    if let Some((k, v)) = prepend_sidecar_deno_to_path(app) {
+    if let Some((k, v)) = prepend_sidecar_deno_to_path(state) {
         cmd.env(k, v);
     }
 
@@ -202,7 +203,7 @@ async fn run_sidecar(
 /// Pass 1: Fetch playlist entries. Uses flat-playlist for YouTube (fast, metadata
 /// comes in pass 2) and full playlist for SoundCloud (flat mode lacks titles).
 pub async fn fetch_playlist(
-    app: &AppHandle,
+    state: &AppState,
     url: &str,
     max_items: u32,
 ) -> Result<Vec<PlaylistEntry>, AppError> {
@@ -211,7 +212,7 @@ pub async fn fetch_playlist(
     // yt-dlp --flat-playlist --dump-json --playlist-end 10 https://www.youtube.com/@VTCNewstintuc # likely have live
 
     let mut args = vec!["--ignore-errors".to_string()];
-    args.extend(ytdlp_base_args(app));
+    args.extend(ytdlp_base_args(state));
 
     args.extend([
         "--flat-playlist".to_string(), // less error
@@ -221,7 +222,7 @@ pub async fn fetch_playlist(
         url.to_string(),
     ]);
 
-    let (code, stdout, stderr) = run_sidecar(app, "binaries/yt-dlp", args).await?;
+    let (code, stdout, stderr) = run_sidecar(state, "binaries/yt-dlp", args).await?;
 
     if code != 0 {
         return Err(AppError::ExtractionFailed(format!(
@@ -255,12 +256,12 @@ pub fn episode_url(feed_source_url: &str, video_id: &str) -> String {
 /// Pass 2: Fetch full metadata for a single episode by URL.
 #[allow(dead_code)]
 pub async fn fetch_video_metadata(
-    app: &AppHandle,
+    state: &AppState,
     url: &str,
 ) -> Result<PlaylistEntry, AppError> {
     // yt-dlp --dump-json --skip-download --no-playlist https://www.youtube.com/watch?v=TjUhXbGdLYo
     let mut args = vec!["--ignore-errors".to_string()];
-    args.extend(ytdlp_base_args(app));
+    args.extend(ytdlp_base_args(state));
     args.extend([
         "--dump-json".to_string(),
         "--skip-download".to_string(),
@@ -268,7 +269,7 @@ pub async fn fetch_video_metadata(
         url.to_string(),
     ]);
 
-    let (code, stdout, stderr) = run_sidecar(app, "binaries/yt-dlp", args).await?;
+    let (code, stdout, stderr) = run_sidecar(state, "binaries/yt-dlp", args).await?;
 
     if code != 0 {
         return Err(AppError::ExtractionFailed(format!(
@@ -294,12 +295,12 @@ fn parse_playlist_lines(stdout: &str) -> Vec<PlaylistEntry> {
 }
 
 pub async fn fetch_channel_artwork_url(
-    app: &AppHandle,
+    state: &AppState,
     url: &str,
 ) -> Result<Option<String>, AppError> {
     // yt-dlp --flat-playlist --dump-single-json --playlist-items 0 https://www.youtube.com/@TuanTienTi2911
     let mut args = vec!["--flat-playlist".to_string()];
-    args.extend(ytdlp_base_args(app));
+    args.extend(ytdlp_base_args(state));
     args.extend([
         "--dump-single-json".to_string(),
         "--playlist-items".to_string(),
@@ -307,7 +308,7 @@ pub async fn fetch_channel_artwork_url(
         url.to_string(),
     ]);
 
-    let (code, stdout, stderr) = run_sidecar(app, "binaries/yt-dlp", args).await?;
+    let (code, stdout, stderr) = run_sidecar(state, "binaries/yt-dlp", args).await?;
 
     if code != 0 {
         log::warn!("[fetch_channel_artwork_url] yt-dlp exit code {code}: {stderr}");
@@ -334,7 +335,7 @@ pub async fn fetch_channel_artwork_url(
 }
 
 pub async fn download_audio(
-    app: &AppHandle,
+    state: &AppState,
     url: &str,
     video_id: &str,
     output_dir: &Path,
@@ -388,7 +389,7 @@ pub async fn download_audio(
         common_args.push("ejs:github".to_string());
 
         // Explicitly wire the bundled Deno runtime to yt-dlp's JS runtime system.
-        if let Some(runtime) = maybe_deno_js_runtime_arg(app) {
+        if let Some(runtime) = maybe_deno_js_runtime_arg(state) {
             common_args.push("--js-runtimes".to_string());
             common_args.push(runtime);
         }
@@ -463,7 +464,7 @@ pub async fn download_audio(
 
             // First attempt for this client: no cookies.
             let (code1, _stdout1, stderr1) =
-                run_sidecar(app, "binaries/yt-dlp", attempt_args.clone()).await?;
+                run_sidecar(state, "binaries/yt-dlp", attempt_args.clone()).await?;
             if code1 == 0 {
                 success = true;
                 break;
@@ -479,7 +480,7 @@ pub async fn download_audio(
                     proxy_args.push(u);
                 }
                 let (codep, _stdoutp, stderrp) =
-                    run_sidecar(app, "binaries/yt-dlp", proxy_args).await?;
+                    run_sidecar(state, "binaries/yt-dlp", proxy_args).await?;
                 if codep == 0 {
                     success = true;
                     break;
@@ -495,7 +496,7 @@ pub async fn download_audio(
                     "chrome".to_string(),
                 ]);
                 let (code2, _stdout2, stderr2) =
-                    run_sidecar(app, "binaries/yt-dlp", cookie_args.clone()).await?;
+                    run_sidecar(state, "binaries/yt-dlp", cookie_args.clone()).await?;
                 if code2 == 0 {
                     success = true;
                     break;
@@ -511,7 +512,7 @@ pub async fn download_audio(
                         proxy_args.push(u);
                     }
                     let (codep, _stdoutp, stderrp) =
-                        run_sidecar(app, "binaries/yt-dlp", proxy_args).await?;
+                        run_sidecar(state, "binaries/yt-dlp", proxy_args).await?;
                     if codep == 0 {
                         success = true;
                         break;
@@ -566,7 +567,7 @@ pub async fn download_audio(
         "-y".to_string(), // overwrite
         audio_path.to_string_lossy().to_string(), // output path
     ];
-    let (code, _stdout, stderr) = run_sidecar(app, "binaries/ffmpeg", ffmpeg_args).await?;
+    let (code, _stdout, stderr) = run_sidecar(state, "binaries/ffmpeg", ffmpeg_args).await?;
     if code != 0 {
         // let _ = std::fs::remove_file(&temp_path);
         return Err(AppError::ExtractionFailed(stderr));

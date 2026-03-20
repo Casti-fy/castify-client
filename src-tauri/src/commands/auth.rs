@@ -1,8 +1,9 @@
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
 use crate::error::AppError;
 use crate::models::{AuthResponse, User};
 use crate::services::auth as auth_service;
+use crate::state::AppState;
 
 #[tauri::command]
 pub async fn login(
@@ -24,14 +25,16 @@ pub async fn register(
 
 #[tauri::command]
 pub async fn check_auth(app: AppHandle) -> Result<User, AppError> {
-    auth_service::fetch_current_user(&app).await
+    let state = app.state::<AppState>();
+    auth_service::fetch_current_user(&state).await
 }
 
 #[tauri::command]
 pub async fn fetch_plans(
     app: AppHandle,
 ) -> Result<std::collections::HashMap<String, crate::models::PlanLimits>, AppError> {
-    auth_service::fetch_plans(&app).await
+    let state = app.state::<AppState>();
+    auth_service::fetch_plans(&state).await
 }
 
 #[tauri::command]

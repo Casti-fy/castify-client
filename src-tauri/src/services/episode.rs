@@ -1,15 +1,12 @@
-use tauri::{AppHandle, Manager};
-
 use crate::error::AppError;
 use crate::models::{CreateEpisodeRequest, CreateEpisodeResponse, UpdateEpisodeMetadataRequest, UpdateEpisodeRequest, UploadURLResponse};
 use crate::state::AppState;
 
 pub async fn create_episode(
-    app: &AppHandle,
+    state: &AppState,
     feed_id: &str,
     body: &CreateEpisodeRequest,
 ) -> Result<CreateEpisodeResponse, AppError> {
-    let state = app.state::<AppState>();
     let api = state.api.read().await;
     api.request_with_body::<CreateEpisodeResponse, _>(
         &format!("/api/v1/feeds/{}/episodes", feed_id),
@@ -21,12 +18,11 @@ pub async fn create_episode(
 }
 
 pub async fn update_status(
-    app: &AppHandle,
+    state: &AppState,
     episode_id: &str,
     status: &str,
     file_size: Option<u64>,
 ) -> Result<(), AppError> {
-    let state = app.state::<AppState>();
     let body = UpdateEpisodeRequest {
         status: status.to_string(),
         file_size,
@@ -41,12 +37,12 @@ pub async fn update_status(
     .await
 }
 
+#[allow(dead_code)]
 pub async fn update_metadata(
-    app: &AppHandle,
+    state: &AppState,
     episode_id: &str,
     body: &UpdateEpisodeMetadataRequest,
 ) -> Result<(), AppError> {
-    let state = app.state::<AppState>();
     let api = state.api.read().await;
     api.request_no_content(
         &format!("/api/v1/episodes/{episode_id}"),
@@ -58,10 +54,9 @@ pub async fn update_metadata(
 }
 
 pub async fn get_upload_url(
-    app: &AppHandle,
+    state: &AppState,
     episode_id: &str,
 ) -> Result<UploadURLResponse, AppError> {
-    let state = app.state::<AppState>();
     let api = state.api.read().await;
     api.request_with_body(
         &format!("/api/v1/episodes/{}/upload-url", episode_id),
@@ -71,4 +66,3 @@ pub async fn get_upload_url(
     )
     .await
 }
-

@@ -11,9 +11,8 @@ use super::{sync_download, sync_scan, sync_upload};
 
 
 /// Push a feed's not-ready episodes to channels with the given priority.
-pub async fn push_feed_episodes(app: &AppHandle, feed_id: &str, priority: Priority) {
-    let state = app.state::<AppState>();
-    let detail = match feeds_service::fetch_feed_detail(app, feed_id).await {
+pub async fn push_feed_episodes(state: &AppState, feed_id: &str, priority: Priority) {
+    let detail = match feeds_service::fetch_feed_detail(state, feed_id).await {
         Ok(d) => d,
         Err(e) => {
             log::warn!("Failed to fetch feed detail for push: {e}");
@@ -60,16 +59,18 @@ pub async fn push_feed_episodes(app: &AppHandle, feed_id: &str, priority: Priori
 }
 
 /// Scan the first N episodes of a feed and push not-ready ones as Urgent.
-/// Also fetches the channel artwork and updates the feed if found.
+/// Also fetches the channel artwork in parallel.
 pub async fn scan_new_feed(app: &AppHandle, feed: &Feed) {
-    // Fetch channel artwork in parallel with episode scan
-    let app_artwork = app.clone();
+    let state = app.state::<AppState>();
+    let state_clone = (*state).clone();
+
     let feed_id = feed.id.clone();
     let source_url = feed.source_url.clone();
+    let state_artwork = state_clone.clone();
     let artwork_handle = tokio::spawn(async move {
-        match extractor::fetch_channel_artwork_url(&app_artwork, &source_url).await {
+        match extractor::fetch_channel_artwork_url(&state_artwork, &source_url).await {
             Ok(Some(url)) => {
-                if let Err(e) = feeds_service::update_feed_artwork(&app_artwork, &feed_id, &url).await {
+                if let Err(e) = feeds_service::update_feed_artwork(&state_artwork, &feed_id, &url).await {
                     log::warn!("[scan_new_feed] failed to update artwork: {e}");
                 }
             }
@@ -79,27 +80,27 @@ pub async fn scan_new_feed(app: &AppHandle, feed: &Feed) {
     });
 
     let feeds = [feed.clone()];
-    let _ = run_sync_for_feeds(app, &feeds, 5, Priority::Urgent).await;
+    run_sync_for_feeds(&state_clone, &feeds, 5, Priority::Urgent).await;
     let _ = artwork_handle.await;
 }
 
 /// Sync a single feed: scan for new episodes, then push any not-ready ones as Urgent.
 pub async fn sync_single_feed(app: &AppHandle, feed_id: &str) -> Result<(), AppError> {
-    let detail = feeds_service::fetch_feed_detail(app, feed_id).await?;
+    let state = app.state::<AppState>();
+    let detail = feeds_service::fetch_feed_detail(&state, feed_id).await?;
     let feed = detail.feed.clone();
-    push_feed_episodes(app, feed_id, Priority::Urgent).await;
-    run_sync_for_feeds(app, &[feed], 10, Priority::Urgent).await?;
+    push_feed_episodes(&state, feed_id, Priority::Urgent).await;
+    run_sync_for_feeds(&state, &[feed], 10, Priority::Urgent).await;
     Ok(())
 }
 
 pub async fn run_sync_for_feeds(
-    app: &AppHandle,
+    state: &AppState,
     feeds: &[Feed],
     max_scan_items: u32,
     priority: Priority,
-) -> Result<(), AppError> {
-    sync_scan::run_scan(app, feeds, max_scan_items, priority).await;
-    Ok(())
+) {
+    sync_scan::run_scan(state, feeds, max_scan_items, priority).await;
 }
 
 // ----- Settings helpers -----
@@ -131,11 +132,13 @@ pub fn write_sync_interval(app: &AppHandle, minutes: u64) {
 
 pub async fn start_periodic_sync(app: &AppHandle) -> Result<(), AppError> {
     let state = app.state::<AppState>();
+    let state_clone = (*state).clone();
     let mut handles = state.sync_handles.lock().await;
 
     log::info!("Starting periodic sync");
 
     let app_scan = app.clone();
+    let state_scan = state_clone.clone();
     handles.scan = Some(tokio::spawn(async move {
         let mut last_scan: Option<tokio::time::Instant> = None;
         loop {
@@ -147,14 +150,14 @@ pub async fn start_periodic_sync(app: &AppHandle) -> Result<(), AppError> {
                 }
             }
 
-            let feeds: Vec<Feed> = match feeds_service::fetch_all_feeds(&app_scan).await {
+            let feeds: Vec<Feed> = match feeds_service::fetch_all_feeds(&state_scan).await {
                 Ok(f) => f,
                 Err(e) => {
                     log::warn!("Failed to fetch feeds: {e}");
                     continue;
                 }
             };
-            let _ = run_sync_for_feeds(&app_scan, &feeds, 5, Priority::High).await;
+            run_sync_for_feeds(&state_scan, &feeds, 5, Priority::High).await;
             last_scan = Some(tokio::time::Instant::now());
         }
     }));
@@ -170,18 +173,18 @@ pub async fn start_periodic_sync(app: &AppHandle) -> Result<(), AppError> {
     let ul_rx = state.sync_channels.upload_rx.lock().await.take();
 
     if let Some(rx) = dl_rx {
-        let app_dl = app.clone();
+        let state_dl = state_clone.clone();
         handles.download = Some(tokio::spawn(async move {
-            sync_download::start_download_worker(app_dl, rx).await;
+            sync_download::start_download_worker(state_dl, rx).await;
         }));
     } else {
         log::warn!("Download receivers unavailable, workers not started");
     }
 
     if let Some(rx) = ul_rx {
-        let app_ul = app.clone();
+        let state_ul = state_clone.clone();
         handles.upload = Some(tokio::spawn(async move {
-            sync_upload::start_upload_worker(app_ul, rx).await;
+            sync_upload::start_upload_worker(state_ul, rx).await;
         }));
     } else {
         log::warn!("Upload receivers unavailable, workers not started");
@@ -198,7 +201,7 @@ pub async fn auto_start_sync(app: &AppHandle) {
         return;
     }
 
-    startup_recovery(app).await;
+    startup_recovery(&state).await;
 
     if let Err(e) = start_periodic_sync(app).await {
         log::warn!("Auto-start sync failed: {e}");
@@ -207,8 +210,8 @@ pub async fn auto_start_sync(app: &AppHandle) {
 }
 
 /// Fetch all not-ready episodes and push them to channels as Normal priority.
-async fn startup_recovery(app: &AppHandle) {
-    let feeds = match feeds_service::fetch_all_feeds(app).await {
+async fn startup_recovery(state: &AppState) {
+    let feeds = match feeds_service::fetch_all_feeds(state).await {
         Ok(f) => f,
         Err(e) => {
             log::warn!("Failed to fetch feeds: {e}");
@@ -217,7 +220,7 @@ async fn startup_recovery(app: &AppHandle) {
     };
 
     for feed in &feeds {
-        push_feed_episodes(app, &feed.id, Priority::Normal).await;
+        push_feed_episodes(state, &feed.id, Priority::Normal).await;
     }
 }
 
@@ -237,4 +240,3 @@ pub async fn stop_periodic_sync(app: AppHandle) -> Result<(), AppError> {
     state.sync_channels.reset().await;
     Ok(())
 }
-

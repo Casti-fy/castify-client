@@ -1,8 +1,14 @@
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex, RwLock};
 
+use crate::models::SyncProgressEvent;
 use crate::services::api_client::ApiClient;
+
+/// Callback for emitting sync progress events.
+/// GUI sets this to forward events to the webview; CLI can log or ignore.
+pub type ProgressEmitter = Arc<dyn Fn(SyncProgressEvent) + Send + Sync>;
 
 // ── Priority & Job ──────────────────────────────────────────────────────────
 
@@ -129,12 +135,19 @@ impl SyncChannels {
 
 // ── App State ───────────────────────────────────────────────────────────────
 
+#[derive(Clone)]
 pub struct AppState {
     pub api: Arc<RwLock<ApiClient>>,
     pub sync_handles: Arc<Mutex<SyncHandles>>,
     pub sync_channels: Arc<SyncChannels>,
     pub cancelled_feeds: Arc<RwLock<HashSet<String>>>,
     pub cached_limits: Arc<RwLock<Option<crate::models::PlanLimits>>>,
+    /// Additional directories to search for sidecar binaries (yt-dlp, ffmpeg, deno).
+    /// Checked after the exe directory. GUI sets this to Tauri's resource dir;
+    /// CLI can set it to a custom path.
+    pub extra_bin_dirs: Arc<std::sync::RwLock<Vec<PathBuf>>>,
+    /// Optional callback for sync progress events.
+    pub on_progress: Arc<std::sync::OnceLock<ProgressEmitter>>,
 }
 
 impl AppState {
@@ -149,6 +162,8 @@ impl AppState {
             sync_channels: Arc::new(SyncChannels::new()),
             cancelled_feeds: Arc::new(RwLock::new(HashSet::new())),
             cached_limits: Arc::new(RwLock::new(None)),
+            extra_bin_dirs: Arc::new(std::sync::RwLock::new(Vec::new())),
+            on_progress: Arc::new(std::sync::OnceLock::new()),
         }
     }
 }

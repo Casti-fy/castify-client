@@ -303,10 +303,8 @@ jobs:
       - name: Generate latest.json
         env:
           VERSION: ${{ github.ref_name }}
+          BASE_URL: https://github.com/Casti-fy/castify-web/releases/download/${{ github.ref_name }}
         run: |
-          REPO="Casti-fy/castify-web"
-          BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
-
           python3 - <<'PYEOF'
           import json, glob, os
 

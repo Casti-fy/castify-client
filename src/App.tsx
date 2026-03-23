@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import type { User, SyncProgressEvent } from "./lib/types";
 import { checkAuth } from "./lib/api";
+import { checkForAppUpdate, scheduleMidnightUTCCheck } from "./lib/updater";
 import { useTauriListener } from "./hooks/useTauriListener";
 import Login from "./pages/Login";
 import FeedsList from "./pages/FeedsList";
@@ -23,6 +24,10 @@ export default function App() {
       .then((u) => setUser(u))
       .catch(() => setUser(null))
       .finally(() => setLoading(false));
+
+    checkForAppUpdate();
+    const cleanup = scheduleMidnightUTCCheck();
+    return cleanup;
   }, []);
 
 

@@ -15,6 +15,8 @@ gui = [
   "dep:tauri-plugin-store",
   "dep:tauri-plugin-log",
   "dep:tauri-plugin-autostart",
+  "dep:tauri-plugin-updater",
+  "dep:tauri-plugin-process",
   "dep:tauri-build",
 ]
 
@@ -27,6 +29,8 @@ tauri-plugin-notification = { version = "2", optional = true }
 tauri-plugin-store = { version = "2", optional = true }
 tauri-plugin-log = { version = "2", optional = true }
 tauri-plugin-autostart = { version = "2", optional = true }
+tauri-plugin-updater = { version = "2", optional = true }
+tauri-plugin-process = { version = "2", optional = true }
 
 # Shared (always)
 serde = { version = "1", features = ["derive"] }

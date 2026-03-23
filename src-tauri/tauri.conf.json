@@ -21,8 +21,17 @@
       }
     ]
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "RWRgNb2WgvH1vJLIn5N0xCW/KE90JbBjk/gcJx1UagtTP7FH3Q5pZ+tl",
+      "endpoints": [
+        "https://github.com/Casti-fy/castify-web/releases/latest/download/latest.json"
+      ]
+    }
+  },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": ["nsis", "dmg", "deb", "appimage"],
     "icon": [
       "icons/32x32.png",

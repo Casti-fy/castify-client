@@ -137,6 +137,8 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           # macOS signing
           APPLE_SIGNING_IDENTITY: ${{ startsWith(matrix.platform, 'macos') && secrets.APPLE_SIGNING_IDENTITY || '' }}
           APPLE_ID: ${{ startsWith(matrix.platform, 'macos') && secrets.APPLE_ID || '' }}
@@ -214,6 +216,18 @@ jobs:
           echo "==> DMG recreated and notarized: $(du -h "$DMG" | cut -f1)"
           rm -rf "$WORK_DIR" "$MOUNT_DIR"
 
+      # The DMG was re-created above, so the original .sig is invalid.
+      # Re-sign the update artifact with the Tauri updater key.
+      - name: Re-sign DMG for updater (macOS)
+        if: startsWith(matrix.platform, 'macos')
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          DMG=$(find src-tauri/target -name '*.dmg' -not -name '*.sig' -type f | head -1)
+          echo "==> Re-signing $DMG for updater..."
+          npx @tauri-apps/cli signer sign "$DMG"
+
       # Repack AppImage with fuse3-compatible runtime so it works on
       # modern distros (Debian 13+, Fedora 40+) without libfuse2.
       - name: Repack AppImage (no libfuse2 dependency)
@@ -243,15 +257,33 @@ jobs:
 
           echo "==> Repacked AppImage: $(du -h "$APPIMAGE" | cut -f1)"
 
+      # The AppImage was repacked above, so the original .sig is invalid.
+      # Re-sign the update artifact with the Tauri updater key.
+      - name: Re-sign AppImage for updater (Linux)
+        if: contains(matrix.platform, 'ubuntu')
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          APPIMAGE=$(find src-tauri/target -name '*.AppImage' -not -name '*.sig' -type f | head -1)
+          if [ -n "$APPIMAGE" ]; then
+            echo "==> Re-signing $APPIMAGE for updater..."
+            npx @tauri-apps/cli signer sign "$APPIMAGE"
+          fi
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: castify-${{ matrix.target }}
           path: |
             src-tauri/target/${{ matrix.target }}/release/bundle/**/*.dmg
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.dmg.sig
             src-tauri/target/${{ matrix.target }}/release/bundle/**/*.exe
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.nsis.zip
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.nsis.zip.sig
             src-tauri/target/${{ matrix.target }}/release/bundle/**/*.deb
             src-tauri/target/${{ matrix.target }}/release/bundle/**/*.AppImage
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.AppImage.sig
           retention-days: 7
 
   release:
@@ -268,6 +300,57 @@ jobs:
       - name: List artifacts
         run: find artifacts -type f | head -80
 
+      - name: Generate latest.json
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          REPO="Casti-fy/castify-web"
+          BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
+
+          python3 - <<'PYEOF'
+          import json, glob, os
+
+          version = os.environ["VERSION"]
+          base_url = os.environ["BASE_URL"]
+
+          # Map target directories to Tauri updater platform keys and their updater artifact extension
+          targets = {
+              "aarch64-apple-darwin": ("darwin-aarch64", ".dmg"),
+              "x86_64-apple-darwin":  ("darwin-x86_64",  ".dmg"),
+              "x86_64-pc-windows-msvc": ("windows-x86_64", ".nsis.zip"),
+              "x86_64-unknown-linux-gnu": ("linux-x86_64", ".AppImage"),
+              "aarch64-unknown-linux-gnu": ("linux-aarch64", ".AppImage"),
+          }
+
+          platforms = {}
+          for target, (platform_key, ext) in targets.items():
+              target_dir = f"artifacts/castify-{target}"
+              sig_files = glob.glob(f"{target_dir}/**/*{ext}.sig", recursive=True)
+              for sig_path in sig_files:
+                  artifact_path = sig_path[:-4]  # remove .sig
+                  if os.path.isfile(artifact_path):
+                      with open(sig_path, "r") as f:
+                          sig = f.read().strip()
+                      filename = os.path.basename(artifact_path)
+                      platforms[platform_key] = {
+                          "signature": sig,
+                          "url": f"{base_url}/{filename}",
+                      }
+
+          from datetime import datetime, timezone
+          latest = {
+              "version": version,
+              "notes": f"Castify {version}",
+              "pub_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "platforms": platforms,
+          }
+
+          with open("artifacts/latest.json", "w") as f:
+              json.dump(latest, f, indent=2)
+
+          print(json.dumps(latest, indent=2))
+          PYEOF
+
       - name: Create release on castify-web
         uses: softprops/action-gh-release@v2
         with:
@@ -278,9 +361,14 @@ jobs:
           token: ${{ secrets.RELEASE_TOKEN }}
           files: |
             artifacts/**/*.dmg
+            artifacts/**/*.dmg.sig
             artifacts/**/*.exe
+            artifacts/**/*.nsis.zip
+            artifacts/**/*.nsis.zip.sig
             artifacts/**/*.deb
             artifacts/**/*.AppImage
+            artifacts/**/*.AppImage.sig
+            artifacts/latest.json
           body: |
             ## Castify ${{ github.ref_name }}
 

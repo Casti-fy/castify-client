@@ -23,7 +23,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "RWRgNb2WgvH1vJLIn5N0xCW/KE90JbBjk/gcJx1UagtTP7FH3Q5pZ+tl",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDM3M0VGOUYyODQ4QkRBQwpSV1NzdlVnb24rOXpBeGJESEVLMlltbVdFTmVZaGNaM1FacnJxREErVkJCdEcxZU1BVndGaXJSRwo=",
       "endpoints": [
         "https://github.com/Casti-fy/castify-web/releases/latest/download/latest.json"
       ]

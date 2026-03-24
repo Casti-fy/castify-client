@@ -148,9 +148,8 @@ jobs:
           args: ${{ matrix.args }}
 
       # Tauri re-signs all binaries inside the .app but strips our custom
-      # entitlements from yt-dlp. Tauri then deletes the .app and only
-      # leaves the DMG. Mount the DMG, copy .app out, re-sign yt-dlp with
-      # disable-library-validation, re-seal the .app, and recreate the DMG.
+      # entitlements from yt-dlp. Re-sign yt-dlp with the correct entitlements,
+      # then recreate both the DMG (for manual download) and .app.tar.gz (for updater).
       - name: Re-sign yt-dlp sidecar with entitlements (macOS)
         if: startsWith(matrix.platform, 'macos')
         shell: bash
@@ -161,26 +160,16 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
-          DMG=$(find src-tauri/target -name '*.dmg' -not -name '*.sig' -type f | head -1)
-          if [ -z "$DMG" ]; then
-            echo "ERROR: DMG not found"
-            find src-tauri/target -name 'Castify*' -type f 2>/dev/null || true
+
+          # Find the .app produced by the "app" bundle target
+          APP=$(find src-tauri/target -path '*/bundle/macos/Castify.app' -type d | head -1)
+          if [ -z "$APP" ]; then
+            echo "ERROR: Castify.app not found"
+            find src-tauri/target -name 'Castify*' -type d 2>/dev/null || true
             exit 1
           fi
-          echo "==> Found $DMG"
+          echo "==> Found $APP"
 
-          # Mount DMG and copy contents out (DMG is read-only)
-          MOUNT_DIR=$(mktemp -d)
-          WORK_DIR=$(mktemp -d)
-          hdiutil attach "$DMG" -mountpoint "$MOUNT_DIR" -nobrowse -quiet
-          cp -R "$MOUNT_DIR/Castify.app" "$WORK_DIR/"
-          # Preserve the Applications symlink for drag-to-install
-          if [ -L "$MOUNT_DIR/Applications" ]; then
-            ln -s /Applications "$WORK_DIR/Applications"
-          fi
-          hdiutil detach "$MOUNT_DIR" -quiet
-
-          APP="$WORK_DIR/Castify.app"
           YTDLP="$APP/Contents/MacOS/yt-dlp"
           ENT="src-tauri/entitlements/yt-dlp.plist"
 
@@ -198,35 +187,62 @@ jobs:
             --sign "$APPLE_SIGNING_IDENTITY" \
             "$APP"
 
-          # Recreate the DMG with same layout
-          echo "==> Recreating DMG at $DMG..."
-          rm -f "$DMG"
-          hdiutil create -volname "Castify" -srcfolder "$WORK_DIR" \
-            -ov -format UDZO "$DMG"
-
-          # Re-notarize the new DMG (re-signing invalidated the original notarization)
-          echo "==> Notarizing DMG..."
-          xcrun notarytool submit "$DMG" \
+          # Re-notarize the .app
+          echo "==> Notarizing Castify.app..."
+          ditto -c -k --keepParent "$APP" /tmp/Castify.app.zip
+          xcrun notarytool submit /tmp/Castify.app.zip \
             --apple-id "$APPLE_ID" \
             --password "$APPLE_PASSWORD" \
             --team-id "$APPLE_TEAM_ID" \
             --wait
-          xcrun stapler staple "$DMG"
+          xcrun stapler staple "$APP"
 
-          echo "==> DMG recreated and notarized: $(du -h "$DMG" | cut -f1)"
-          rm -rf "$WORK_DIR" "$MOUNT_DIR"
+          # Recreate the .app.tar.gz updater artifact
+          TARGZ=$(find src-tauri/target -name '*.app.tar.gz' -not -name '*.sig' -type f | head -1)
+          echo "==> Recreating updater archive at $TARGZ..."
+          MACOS_DIR=$(dirname "$APP")
+          tar -czf "$TARGZ" -C "$MACOS_DIR" "Castify.app"
+          echo "==> Updater archive: $(du -h "$TARGZ" | cut -f1)"
 
-      # The DMG was re-created above, so the original .sig is invalid.
-      # Re-sign the update artifact with the Tauri updater key.
-      - name: Re-sign DMG for updater (macOS)
+          # Recreate the DMG for manual download
+          DMG=$(find src-tauri/target -name '*.dmg' -not -name '*.sig' -type f | head -1)
+          if [ -n "$DMG" ]; then
+            echo "==> Recreating DMG at $DMG..."
+            DMG_WORK=$(mktemp -d)
+            cp -R "$APP" "$DMG_WORK/"
+            ln -s /Applications "$DMG_WORK/Applications"
+            rm -f "$DMG"
+            hdiutil create -volname "Castify" -srcfolder "$DMG_WORK" \
+              -ov -format UDZO "$DMG"
+
+            echo "==> Notarizing DMG..."
+            xcrun notarytool submit "$DMG" \
+              --apple-id "$APPLE_ID" \
+              --password "$APPLE_PASSWORD" \
+              --team-id "$APPLE_TEAM_ID" \
+              --wait
+            xcrun stapler staple "$DMG"
+            echo "==> DMG recreated and notarized: $(du -h "$DMG" | cut -f1)"
+            rm -rf "$DMG_WORK"
+          fi
+
+      # The DMG and .app.tar.gz were re-created above, so the original .sig files are invalid.
+      # Re-sign both updater artifacts with the Tauri updater key.
+      - name: Re-sign updater artifacts (macOS)
         if: startsWith(matrix.platform, 'macos')
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
+          TARGZ=$(find src-tauri/target -name '*.app.tar.gz' -not -name '*.sig' -type f | head -1)
+          echo "==> Re-signing $TARGZ for updater..."
+          npx @tauri-apps/cli signer sign "$TARGZ"
+
           DMG=$(find src-tauri/target -name '*.dmg' -not -name '*.sig' -type f | head -1)
-          echo "==> Re-signing $DMG for updater..."
-          npx @tauri-apps/cli signer sign "$DMG"
+          if [ -n "$DMG" ]; then
+            echo "==> Re-signing $DMG for updater..."
+            npx @tauri-apps/cli signer sign "$DMG"
+          fi
 
       # Repack AppImage with fuse3-compatible runtime so it works on
       # modern distros (Debian 13+, Fedora 40+) without libfuse2.
@@ -276,6 +292,8 @@ jobs:
         with:
           name: castify-${{ matrix.target }}
           path: |
+            src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz
+            src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz.sig
             src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
             src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg.sig
             src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
@@ -313,8 +331,8 @@ jobs:
 
           # Map target directories to Tauri updater platform keys and their updater artifact extension
           targets = {
-              "aarch64-apple-darwin": ("darwin-aarch64", ".dmg"),
-              "x86_64-apple-darwin":  ("darwin-x86_64",  ".dmg"),
+              "aarch64-apple-darwin": ("darwin-aarch64", ".app.tar.gz"),
+              "x86_64-apple-darwin":  ("darwin-x86_64",  ".app.tar.gz"),
               "x86_64-pc-windows-msvc": ("windows-x86_64", ".nsis.zip"),
               "x86_64-unknown-linux-gnu": ("linux-x86_64", ".AppImage"),
               "aarch64-unknown-linux-gnu": ("linux-aarch64", ".AppImage"),
@@ -358,6 +376,8 @@ jobs:
           draft: false
           token: ${{ secrets.RELEASE_TOKEN }}
           files: |
+            artifacts/**/*.app.tar.gz
+            artifacts/**/*.app.tar.gz.sig
             artifacts/**/*.dmg
             artifacts/**/*.dmg.sig
             artifacts/**/*.exe

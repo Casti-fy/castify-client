@@ -10,9 +10,9 @@
 
 - [ ] Client identification — set a `User-Agent` header on the API client (e.g., `Castify/0.1.0 (macos; aarch64)`) so the server knows which platform/version users are on. Use `env!("CARGO_PKG_VERSION")`, `std::env::consts::OS`, and `std::env::consts::ARCH`.
 
-- [ ] App auto-update — use Tauri's built-in updater plugin (`tauri-plugin-updater`) to check for new app versions on startup. Show an in-app notification/banner when an update is available (e.g., "Castify v0.2.0 is available — click to update"). The update endpoint can point to the GitHub Releases on `Casti-fy/castify-web`. Tauri's updater supports delta updates and signature verification out of the box.
+- [x] App auto-update — use Tauri's built-in updater plugin (`tauri-plugin-updater`) to check for new app versions on startup. Show an in-app notification/banner when an update is available (e.g., "Castify v0.2.0 is available — click to update"). The update endpoint can point to the GitHub Releases on `Casti-fy/castify-web`. Tauri's updater supports delta updates and signature verification out of the box.
 
-- [ ] CLI tool — restore the CLI binary (`castify-cli`) for scripting, CI, and headless use. The service layer is already decoupled from Tauri (`services/` has no GUI deps). Previous implementation exists in git history (commit `13e6389`). Steps: (1) re-create `cli.rs` with clap subcommands (login, logout, feed list/add, sync), (2) re-create `storage.rs` for file-based credential storage at `~/.config/castify/`, (3) add `[[bin]]` target in Cargo.toml with `--no-default-features --features cli`. Main challenge: services take `&AppHandle` — need to abstract over a trait or create a lightweight CLI-only app context.
+- [] CLI tool — restore the CLI binary (`castify-cli`) for scripting, CI, and headless use. The service layer is already decoupled from Tauri (`services/` has no GUI deps). Previous implementation exists in git history (commit `13e6389`). Steps: (1) re-create `cli.rs` with clap subcommands (login, logout, feed list/add, sync), (2) re-create `storage.rs` for file-based credential storage at `~/.config/castify/`, (3) add `[[bin]]` target in Cargo.toml with `--no-default-features --features cli`. Main challenge: services take `&AppHandle` — need to abstract over a trait or create a lightweight CLI-only app context.
 
 ## Marketing
 

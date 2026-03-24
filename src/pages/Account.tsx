@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { isEnabled, enable, disable } from "@tauri-apps/plugin-autostart";
 import type { User, PlanLimits } from "../lib/types";
 import * as api from "../lib/api";
+import { checkForAppUpdate, type UpdateProgress } from "../lib/updater";
 
 interface Props {
   user: User;
@@ -55,6 +56,7 @@ export default function Account({ user, onBack, onLogout, onUserUpdate }: Props)
   const [loading, setLoading] = useState<string | null>(null);
   const [launchAtStartup, setLaunchAtStartup] = useState(false);
   const [allPlanLimits, setAllPlanLimits] = useState<Record<string, PlanLimits> | null>(null);
+  const [updateProgress, setUpdateProgress] = useState<UpdateProgress | null>(null);
 
   // Load persisted sync interval, autostart setting, and plan limits
   useEffect(() => {
@@ -264,6 +266,40 @@ export default function Account({ user, onBack, onLogout, onUserUpdate }: Props)
           <button className="btn small" onClick={handleClearCache}>
             Clear cache
           </button>
+        </div>
+
+        <div className="setting-row">
+          <label>Version</label>
+          <span>{__APP_VERSION__}</span>
+        </div>
+
+        <div className="setting-row">
+          <label>App updates</label>
+          {updateProgress?.phase === "downloading" ? (
+            <div className="update-progress">
+              <div className="update-progress-bar">
+                <div
+                  className="update-progress-fill"
+                  style={{ width: `${updateProgress.percent ?? 0}%` }}
+                />
+              </div>
+              <span className="update-progress-label">
+                {updateProgress.percent != null ? `${updateProgress.percent}%` : "Downloading..."}
+              </span>
+            </div>
+          ) : (
+            <button
+              className="btn small"
+              disabled={updateProgress !== null}
+              onClick={() => {
+                checkForAppUpdate(false, (p) => setUpdateProgress(p ?? null));
+              }}
+            >
+              {updateProgress?.phase === "checking" ? "Checking..." :
+               updateProgress?.phase === "installing" ? "Installing..." :
+               "Check for updates"}
+            </button>
+          )}
         </div>
       </div>
     </div>

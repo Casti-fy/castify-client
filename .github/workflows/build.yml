@@ -314,6 +314,23 @@ jobs:
         with:
           path: artifacts
 
+      - name: Rename artifacts (strip version from filenames)
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          # Strip version tag from filenames: Castify_0.1.2_aarch64.dmg -> Castify_aarch64.dmg
+          VER="${VERSION#v}"  # remove leading v
+          find artifacts -type f | while read f; do
+            dir=$(dirname "$f")
+            base=$(basename "$f")
+            # Replace _<version>_ with _ (e.g., Castify_0.1.2_x64.dmg -> Castify_x64.dmg)
+            newbase=$(echo "$base" | sed "s/_${VER}_/_/" | sed "s/_${VER}\\././" )
+            if [ "$base" != "$newbase" ]; then
+              echo "  $base -> $newbase"
+              mv "$f" "$dir/$newbase"
+            fi
+          done
+
       - name: List artifacts
         run: find artifacts -type f | head -80
 

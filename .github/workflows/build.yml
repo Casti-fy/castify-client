@@ -197,12 +197,21 @@ jobs:
             --wait
           xcrun stapler staple "$APP"
 
-          # Recreate the .app.tar.gz updater artifact
+          # Recreate the .app.tar.gz updater artifact with arch-specific name
           TARGZ=$(find src-tauri/target -name '*.app.tar.gz' -not -name '*.sig' -type f | head -1)
-          echo "==> Recreating updater archive at $TARGZ..."
           MACOS_DIR=$(dirname "$APP")
-          tar -czf "$TARGZ" -C "$MACOS_DIR" "Castify.app"
-          echo "==> Updater archive: $(du -h "$TARGZ" | cut -f1)"
+          # Extract arch from DMG name (e.g., "aarch64" or "x64")
+          DMG_NAME=$(find src-tauri/target -name '*.dmg' -not -name '*.sig' -type f -exec basename {} \; | head -1)
+          ARCH=$(echo "$DMG_NAME" | sed 's/.*_\(.*\)\.dmg/\1/')
+          TARGZ_DIR=$(dirname "$TARGZ")
+          TARGZ_NEW="${TARGZ_DIR}/Castify_${ARCH}.app.tar.gz"
+          echo "==> Recreating updater archive at $TARGZ_NEW..."
+          tar -czf "$TARGZ_NEW" -C "$MACOS_DIR" "Castify.app"
+          # Remove the original generic-named tar.gz if different
+          if [ "$TARGZ" != "$TARGZ_NEW" ]; then
+            rm -f "$TARGZ" "${TARGZ}.sig"
+          fi
+          echo "==> Updater archive: $(du -h "$TARGZ_NEW" | cut -f1)"
 
           # Recreate the DMG for manual download
           DMG=$(find src-tauri/target -name '*.dmg' -not -name '*.sig' -type f | head -1)

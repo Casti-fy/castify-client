@@ -312,7 +312,7 @@ jobs:
           find "$BUNDLE" -maxdepth 3 -type f -name "Castify*" | while read f; do
             base=$(basename "$f")
             case "$base" in
-              *.app.tar.gz.sig|*.app.tar.gz|*.dmg.sig|*.dmg|*.nsis.zip.sig|*.nsis.zip|*.exe.sig|*.exe|*.AppImage.sig|*.AppImage|*.deb.sig|*.deb)
+              *.app.tar.gz.sig|*.app.tar.gz|*.dmg.sig|*.dmg|*.exe.sig|*.exe|*.AppImage.sig|*.AppImage|*.deb.sig|*.deb)
                 newbase=$(echo "$base" | sed "s/_${VER}_/_/" | sed "s/_${VER}\\././")
                 echo "  $base -> $newbase"
                 cp "$f" "$STAGING/$newbase"
@@ -359,7 +359,7 @@ jobs:
           targets = {
               "aarch64-apple-darwin": ("darwin-aarch64", ".app.tar.gz"),
               "x86_64-apple-darwin":  ("darwin-x86_64",  ".app.tar.gz"),
-              "x86_64-pc-windows-msvc": ("windows-x86_64", ".nsis.zip"),
+              "x86_64-pc-windows-msvc": ("windows-x86_64", ".exe"),
               "x86_64-unknown-linux-gnu": ("linux-x86_64", ".AppImage"),
               "aarch64-unknown-linux-gnu": ("linux-aarch64", ".AppImage"),
           }
@@ -407,8 +407,7 @@ jobs:
             artifacts/**/*.dmg
             artifacts/**/*.dmg.sig
             artifacts/**/*.exe
-            artifacts/**/*.nsis.zip
-            artifacts/**/*.nsis.zip.sig
+            artifacts/**/*.exe.sig
             artifacts/**/*.deb
             artifacts/**/*.AppImage
             artifacts/**/*.AppImage.sig

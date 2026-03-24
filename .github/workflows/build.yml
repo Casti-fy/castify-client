@@ -296,27 +296,33 @@ jobs:
             npx @tauri-apps/cli signer sign "$APPIMAGE"
           fi
 
-      - name: Strip version from artifact filenames
+      - name: Collect release artifacts
         shell: bash
         run: |
           BUNDLE="src-tauri/target/${{ matrix.target }}/release/bundle"
+          STAGING="staging"
+          mkdir -p "$STAGING"
           VER=$(grep '"version"' src-tauri/tauri.conf.json | head -1 | sed 's/.*"\([0-9][0-9.]*\)".*/\1/')
-          echo "==> Stripping version $VER from filenames in $BUNDLE"
-          find "$BUNDLE" -type f | while read f; do
-            dir=$(dirname "$f")
-            base=$(basename "$f")
-            newbase=$(echo "$base" | sed "s/_${VER}_/_/" | sed "s/_${VER}\\././")
-            if [ "$base" != "$newbase" ]; then
+
+          # Copy only final distributable files (not intermediate build dirs)
+          for ext in .app.tar.gz .app.tar.gz.sig .dmg .dmg.sig .exe .nsis.zip .nsis.zip.sig .deb .AppImage .AppImage.sig; do
+            find "$BUNDLE" -maxdepth 2 -name "*${ext}" -type f | while read f; do
+              base=$(basename "$f")
+              # Strip version from filename
+              newbase=$(echo "$base" | sed "s/_${VER}_/_/" | sed "s/_${VER}\\././")
               echo "  $base -> $newbase"
-              mv "$f" "$dir/$newbase"
-            fi
+              cp "$f" "$STAGING/$newbase"
+            done
           done
+
+          echo "==> Staged artifacts:"
+          ls -lh "$STAGING/"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: castify-${{ matrix.target }}
-          path: src-tauri/target/${{ matrix.target }}/release/bundle
+          path: staging/
           retention-days: 7
 
   release:
@@ -331,7 +337,7 @@ jobs:
           path: artifacts
 
       - name: List artifacts
-        run: find artifacts -type f | head -80
+        run: find artifacts -type f | sort
 
       - name: Generate latest.json
         env:

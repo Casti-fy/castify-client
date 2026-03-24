@@ -296,6 +296,22 @@ jobs:
             npx @tauri-apps/cli signer sign "$APPIMAGE"
           fi
 
+      - name: Strip version from artifact filenames
+        shell: bash
+        run: |
+          BUNDLE="src-tauri/target/${{ matrix.target }}/release/bundle"
+          VER=$(grep '"version"' src-tauri/tauri.conf.json | head -1 | sed 's/.*"\([0-9][0-9.]*\)".*/\1/')
+          echo "==> Stripping version $VER from filenames in $BUNDLE"
+          find "$BUNDLE" -type f | while read f; do
+            dir=$(dirname "$f")
+            base=$(basename "$f")
+            newbase=$(echo "$base" | sed "s/_${VER}_/_/" | sed "s/_${VER}\\././")
+            if [ "$base" != "$newbase" ]; then
+              echo "  $base -> $newbase"
+              mv "$f" "$dir/$newbase"
+            fi
+          done
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -313,23 +329,6 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-
-      - name: Rename artifacts (strip version from filenames)
-        env:
-          VERSION: ${{ github.ref_name }}
-        run: |
-          # Strip version tag from filenames: Castify_0.1.2_aarch64.dmg -> Castify_aarch64.dmg
-          VER="${VERSION#v}"  # remove leading v
-          find artifacts -type f | while read f; do
-            dir=$(dirname "$f")
-            base=$(basename "$f")
-            # Replace _<version>_ with _ (e.g., Castify_0.1.2_x64.dmg -> Castify_x64.dmg)
-            newbase=$(echo "$base" | sed "s/_${VER}_/_/" | sed "s/_${VER}\\././" )
-            if [ "$base" != "$newbase" ]; then
-              echo "  $base -> $newbase"
-              mv "$f" "$dir/$newbase"
-            fi
-          done
 
       - name: List artifacts
         run: find artifacts -type f | head -80

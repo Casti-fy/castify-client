@@ -84,7 +84,7 @@ pub async fn sync_single_feed(state: &AppState, feed_id: &str) -> Result<(), App
     let detail = feeds_service::fetch_feed_detail(state, feed_id).await?;
     let feed = detail.feed.clone();
     push_feed_episodes(state, feed_id, Priority::Urgent).await;
-    run_sync_for_feeds(state, &[feed], 10, Priority::Urgent).await;
+    run_sync_for_feeds(state, &[feed], 20, Priority::Urgent).await;
     Ok(())
 }
 

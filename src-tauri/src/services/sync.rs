@@ -123,6 +123,7 @@ pub async fn start_periodic_sync(state: &AppState) -> Result<(), AppError> {
             let interval = Duration::from_secs(interval_minutes * 60);
             if let Some(last) = last_scan {
                 if last.elapsed() < interval {
+                    tokio::time::sleep(Duration::from_secs(60)).await;
                     continue;
                 }
             }

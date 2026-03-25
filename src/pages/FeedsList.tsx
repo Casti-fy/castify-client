@@ -12,6 +12,7 @@ interface Props {
 
 export default function FeedsList({ onSelectFeed, onAccount, syncStatus }: Props) {
   const [feeds, setFeeds] = useState<Feed[]>([]);
+  const [search, setSearch] = useState("");
   const [showAdd, setShowAdd] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const { copiedId, copy } = useCopyToClipboard();
@@ -42,35 +43,48 @@ export default function FeedsList({ onSelectFeed, onAccount, syncStatus }: Props
   };
 
   return (
-    <div className="page">
-      <header className="toolbar">
-        <h2>Feeds ({feeds.length})</h2>
-        <div className="toolbar-actions">
-          <button
-            className="btn"
-            onClick={() => setShowAdd(true)}
-          >
-            + Add Feed
-          </button>
-          <button className="btn" onClick={onAccount}>
-            Account
-          </button>
-        </div>
-      </header>
+    <div className="page feed-detail-page">
+      <div className="feed-detail-header">
+        <header className="toolbar">
+          <h2>Feeds ({feeds.length})</h2>
+          <div className="toolbar-actions">
+            <button
+              className="btn"
+              onClick={() => setShowAdd(true)}
+            >
+              + Add Feed
+            </button>
+            <button className="btn" onClick={onAccount}>
+              Account
+            </button>
+          </div>
+        </header>
 
-      {syncStatus && <div className="sync-status">{syncStatus}</div>}
+        <input
+          className="search-input"
+          placeholder="Search feeds..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
 
-      {deleteError && (
-        <div className="error-banner">
-          {deleteError}
-          <button className="btn link" onClick={() => setDeleteError(null)}>
-            Dismiss
-          </button>
-        </div>
-      )}
+        {syncStatus && <div className="sync-status">{syncStatus}</div>}
 
-      <ul className="feed-list">
-        {feeds.map((feed) => (
+        {deleteError && (
+          <div className="error-banner">
+            {deleteError}
+            <button className="btn link" onClick={() => setDeleteError(null)}>
+              Dismiss
+            </button>
+          </div>
+        )}
+      </div>
+
+      <ul className="feed-list episode-list-scroll">
+        {feeds.filter((f) => {
+          if (!search) return true;
+          const q = search.toLowerCase();
+          return f.name.toLowerCase().includes(q) || f.source_url.toLowerCase().includes(q);
+        }).map((feed) => (
           <li key={feed.id} className="feed-item">
             <div
               className="feed-info"

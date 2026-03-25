@@ -19,6 +19,7 @@ function formatDuration(sec: number): string {
 export default function FeedDetail({ feedId, user, onBack }: Props) {
   const limits = user.limits;
   const [detail, setDetail] = useState<FeedDetailResponse | null>(null);
+  const [search, setSearch] = useState("");
   const [syncing, setSyncing] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const { copiedId, copy } = useCopyToClipboard();
@@ -116,10 +117,20 @@ export default function FeedDetail({ feedId, user, onBack }: Props) {
         )}
 
         {deleteError && <div className="error-banner">{deleteError}</div>}
+
+        <input
+          className="search-input"
+          placeholder="Search episodes..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
       </div>
 
       <ul className="episode-list episode-list-scroll">
-        {detail.episodes.map((ep: Episode) => (
+        {detail.episodes.filter((ep) => {
+          if (!search) return true;
+          return ep.title.toLowerCase().includes(search.toLowerCase());
+        }).map((ep: Episode) => (
           <li key={ep.id} className="episode-item">
             <div className="episode-info">
               <strong>{ep.title}</strong>

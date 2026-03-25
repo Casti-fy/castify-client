@@ -149,6 +149,17 @@ input::placeholder {
   background: rgba(220, 38, 38, 0.06);
 }
 
+.btn.danger-fill {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+  font-weight: 600;
+}
+
+.btn.danger-fill:hover {
+  background: var(--danger-hover);
+}
+
 .btn.link {
   border: none;
   background: none;

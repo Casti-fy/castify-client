@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import type { Feed, SyncProgressEvent } from "../lib/types";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useTauriListener } from "../hooks/useTauriListener";
+import ConfirmModal from "../components/ConfirmModal";
 import * as api from "../lib/api";
 
 interface Props {
@@ -15,6 +16,7 @@ export default function FeedsList({ onSelectFeed, onAccount, syncStatus }: Props
   const [search, setSearch] = useState("");
   const [showAdd, setShowAdd] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<Feed | null>(null);
   const { copiedId, copy } = useCopyToClipboard();
 
   const load = useCallback(() => {
@@ -33,11 +35,12 @@ export default function FeedsList({ onSelectFeed, onAccount, syncStatus }: Props
   }, [load]);
 
   const handleDelete = async (feed: Feed) => {
-    if (!confirm(`Delete "${feed.name}"? This will remove the feed and all its episodes.`)) return;
     try {
       await api.deleteFeed(feed.id);
+      setConfirmDelete(null);
       load();
     } catch (err) {
+      setConfirmDelete(null);
       setDeleteError(String(err));
     }
   };
@@ -102,7 +105,7 @@ export default function FeedsList({ onSelectFeed, onAccount, syncStatus }: Props
               </button>
               <button
                 className="btn small danger"
-                onClick={() => handleDelete(feed)}
+                onClick={() => setConfirmDelete(feed)}
               >
                 Delete
               </button>
@@ -120,6 +123,15 @@ export default function FeedsList({ onSelectFeed, onAccount, syncStatus }: Props
             setShowAdd(false);
             load();
           }}
+        />
+      )}
+
+      {confirmDelete && (
+        <ConfirmModal
+          title={`Delete "${confirmDelete.name}"?`}
+          message="This will remove the feed and all its episodes."
+          onConfirm={() => handleDelete(confirmDelete)}
+          onCancel={() => setConfirmDelete(null)}
         />
       )}
     </div>

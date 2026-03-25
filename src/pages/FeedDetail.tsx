@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import type { Episode, FeedDetailResponse, SyncProgressEvent, User } from "../lib/types";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useTauriListener } from "../hooks/useTauriListener";
+import ConfirmModal from "../components/ConfirmModal";
 import * as api from "../lib/api";
 
 interface Props {
@@ -22,6 +23,7 @@ export default function FeedDetail({ feedId, user, onBack }: Props) {
   const [search, setSearch] = useState("");
   const [syncing, setSyncing] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [showConfirmDelete, setShowConfirmDelete] = useState(false);
   const { copiedId, copy } = useCopyToClipboard();
 
   const load = () => {
@@ -52,16 +54,12 @@ export default function FeedDetail({ feedId, user, onBack }: Props) {
   };
 
   const handleDelete = async () => {
-    if (
-      !confirm(
-        `Delete "${detail?.feed.name}"? This will remove the feed and all its episodes.`
-      )
-    )
-      return;
     try {
       await api.deleteFeed(feedId);
+      setShowConfirmDelete(false);
       onBack();
     } catch (err) {
+      setShowConfirmDelete(false);
       setDeleteError(String(err));
     }
   };
@@ -82,7 +80,7 @@ export default function FeedDetail({ feedId, user, onBack }: Props) {
             <button className="btn" onClick={handleSync} disabled={syncing}>
               {syncing ? "Syncing..." : "Refresh"}
             </button>
-            <button className="btn danger" onClick={handleDelete}>
+            <button className="btn danger" onClick={() => setShowConfirmDelete(true)}>
               Delete Feed
             </button>
           </div>
@@ -153,6 +151,15 @@ export default function FeedDetail({ feedId, user, onBack }: Props) {
           <li className="empty">No episodes yet. Click Refresh to sync.</li>
         )}
       </ul>
+
+      {showConfirmDelete && (
+        <ConfirmModal
+          title={`Delete "${detail.feed.name}"?`}
+          message="This will remove the feed and all its episodes."
+          onConfirm={handleDelete}
+          onCancel={() => setShowConfirmDelete(false)}
+        />
+      )}
     </div>
   );
 }

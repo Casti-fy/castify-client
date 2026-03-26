@@ -46,6 +46,20 @@ pub fn run() {
                 }));
             }
 
+            // Wire 401 handler to emit auth-expired event to the frontend
+            {
+                use tauri::Emitter;
+                let handle = app.handle().clone();
+                let state = app.state::<AppState>();
+                tauri::async_runtime::block_on(async {
+                    state.api.write().await.set_on_unauthorized(
+                        std::sync::Arc::new(move || {
+                            let _ = handle.emit("auth-expired", ());
+                        }),
+                    );
+                });
+            }
+
             // Set Tauri's resource dir as an extra binary search path
             if let Ok(dir) = app.path().resource_dir() {
                 let state = app.state::<AppState>();

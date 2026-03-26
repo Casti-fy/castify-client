@@ -39,6 +39,13 @@ export default function App() {
       .catch(() => {});
   }, [user]);
 
+  // Listen for auth-expired (401) — show login screen
+  useTauriListener("auth-expired", () => {
+    setUser(null);
+    setPage({ name: "feeds" });
+    setSyncStatus("");
+  }, []);
+
   // Listen for sync progress events
   useTauriListener<SyncProgressEvent>("sync-progress", (event) => {
     const { feed_name, step, message } = event.payload;
@@ -50,7 +57,11 @@ export default function App() {
   }, []);
 
   if (loading) {
-    return <div className="center">Loading...</div>;
+    return (
+      <div className="center">
+        <img className="loading-spinner" src="/loading.svg" alt="Loading" />
+      </div>
+    );
   }
 
   if (!user) {

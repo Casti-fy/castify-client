@@ -8,6 +8,9 @@ pub enum AppError {
     #[error("HTTP {0}")]
     Status(u16),
 
+    #[error("Unauthorized")]
+    Unauthorized,
+
     #[error("Network error: {0}")]
     Network(String),
 

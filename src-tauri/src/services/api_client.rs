@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use reqwest::{Client, RequestBuilder};
 use serde::{de::DeserializeOwned, Serialize};
 
@@ -8,6 +10,7 @@ pub struct ApiClient {
     client: Client,
     base_url: String,
     token: Option<String>,
+    on_unauthorized: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
 impl ApiClient {
@@ -16,7 +19,12 @@ impl ApiClient {
             client: Client::new(),
             base_url: base_url.to_string(),
             token,
+            on_unauthorized: None,
         }
+    }
+
+    pub fn set_on_unauthorized(&mut self, cb: Arc<dyn Fn() + Send + Sync>) {
+        self.on_unauthorized = Some(cb);
     }
 
     pub fn set_token(&mut self, token: Option<String>) {
@@ -61,6 +69,13 @@ impl ApiClient {
     async fn send_and_check(&self, req: RequestBuilder) -> Result<reqwest::Response, AppError> {
         let resp = req.send().await?;
         let status = resp.status().as_u16();
+
+        if status == 401 {
+            if let Some(cb) = &self.on_unauthorized {
+                cb();
+            }
+            return Err(AppError::Unauthorized);
+        }
 
         if status >= 400 {
             if let Ok(err) = resp.json::<ErrorResponse>().await {

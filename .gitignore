@@ -6,6 +6,12 @@ src-tauri/gen/schemas/
 # Sidecar binaries (run scripts/build-dependencies.sh to fetch)
 src-tauri/binaries/yt-dlp-*
 src-tauri/binaries/ffmpeg-*
+src-tauri/binaries/deno-*
+
+
+scripts/yt_*
+test.sh
+
 
 # OS
 .DS_Store

@@ -55,33 +55,11 @@ export async function checkForAppUpdate(
   }
 }
 
-function msUntilMidnightUTC(): number {
-  const now = new Date();
-  const tomorrow = new Date(
-    Date.UTC(
-      now.getUTCFullYear(),
-      now.getUTCMonth(),
-      now.getUTCDate() + 1,
-      0,
-      0,
-      0,
-      0,
-    ),
-  );
-  return Math.max(tomorrow.getTime() - now.getTime(), 60_000);
-}
-
 export function scheduleMidnightUTCCheck(): () => void {
-  const ONE_DAY_MS = 24 * 60 * 60 * 1000;
-  let intervalId: ReturnType<typeof setInterval> | undefined;
+  // App.tsx already triggers an initial silent check on startup.
+  // Here we repeat checks every hour.
+  const ONE_HOUR_MS = 60 * 60 * 1000;
+  const intervalId = setInterval(checkForAppUpdate, ONE_HOUR_MS);
 
-  const timeoutId = setTimeout(() => {
-    checkForAppUpdate();
-    intervalId = setInterval(checkForAppUpdate, ONE_DAY_MS);
-  }, msUntilMidnightUTC());
-
-  return () => {
-    clearTimeout(timeoutId);
-    if (intervalId !== undefined) clearInterval(intervalId);
-  };
+  return () => clearInterval(intervalId);
 }

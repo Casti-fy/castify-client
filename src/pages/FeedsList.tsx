@@ -12,7 +12,7 @@ interface Props {
 }
 
 export default function FeedsList({ onSelectFeed, onAccount, syncStatus }: Props) {
-  const [feeds, setFeeds] = useState<Feed[]>([]);
+  const [feeds, setFeeds] = useState<Feed[] | null>(null);
   const [search, setSearch] = useState("");
   const [showAdd, setShowAdd] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -44,6 +44,20 @@ export default function FeedsList({ onSelectFeed, onAccount, syncStatus }: Props
       setDeleteError(String(err));
     }
   };
+
+  if (!feeds) {
+    return (
+      <div className="center">
+        <img className="loading-spinner" src="/loading.svg" alt="Loading" />
+      </div>
+    );
+  }
+
+  const visibleFeeds = feeds.filter((f) => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return f.name.toLowerCase().includes(q) || f.source_url.toLowerCase().includes(q);
+  });
 
   return (
     <div className="page feed-detail-page">
@@ -83,11 +97,7 @@ export default function FeedsList({ onSelectFeed, onAccount, syncStatus }: Props
       </div>
 
       <ul className="feed-list episode-list-scroll">
-        {feeds.filter((f) => {
-          if (!search) return true;
-          const q = search.toLowerCase();
-          return f.name.toLowerCase().includes(q) || f.source_url.toLowerCase().includes(q);
-        }).map((feed) => (
+        {visibleFeeds.map((feed) => (
           <li key={feed.id} className="feed-item">
             <div
               className="feed-info"

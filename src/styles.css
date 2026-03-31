@@ -47,6 +47,11 @@ h1, h2, h3 {
   color: var(--text-secondary);
 }
 
+.loading-spinner {
+  width: 44px;
+  height: 44px;
+}
+
 .app {
   min-height: 100vh;
 }
@@ -63,10 +68,11 @@ h1, h2, h3 {
   text-align: center;
   font-size: 36px;
   margin-bottom: 8px;
-  background: linear-gradient(135deg, #FF0000 0%, #8B0000 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: var(--primary);
+}
+
+.login-form .btn.primary {
+  background: var(--primary);
 }
 
 /* Inputs */
@@ -129,7 +135,7 @@ input::placeholder {
 }
 
 .btn.primary {
-  background: linear-gradient(135deg, #FF0000 0%, #8B0000 100%);
+  background: var(--primary);
   border-color: transparent;
   color: #fff;
   font-weight: 600;
@@ -546,7 +552,7 @@ input::placeholder {
 
 .update-progress-fill {
   height: 100%;
-  background: linear-gradient(135deg, #FF0000, #8B0000);
+  background: var(--primary);
   border-radius: 3px;
   transition: width 0.2s ease;
 }

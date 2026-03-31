@@ -65,7 +65,11 @@ export default function FeedDetail({ feedId, user, onBack }: Props) {
   };
 
   if (!detail) {
-    return <div className="center">Loading...</div>;
+    return (
+      <div className="center">
+        <img className="loading-spinner" src="/loading.svg" alt="Loading" />
+      </div>
+    );
   }
 
   return (

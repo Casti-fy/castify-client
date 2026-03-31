@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use crate::error::AppError;
 use crate::models::Feed;
-use crate::services::{extractor, feeds as feeds_service};
+use crate::services::{episode as episode_service, extractor, feeds as feeds_service};
 use crate::state::{AppState, Job, Priority};
 
 use super::{sync_download, sync_scan, sync_upload};
@@ -17,30 +17,16 @@ pub async fn push_feed_episodes(state: &AppState, feed_id: &str, priority: Prior
             return;
         }
     };
+    log::info!("Pushing feed episodes for feed {feed_id}: {:?}", detail.episodes);
     for ep in &detail.episodes {
         match ep.status.as_str() {
             "pending" | "failed" => {
                 let episode_url =
                     extractor::episode_url(&detail.feed.source_url, &ep.video_id);
+                log::info!("Pushing episode {:?} to download channel", ep);
                 state
                     .sync_channels
                     .send_download(Job {
-                        feed_id: feed_id.to_string(),
-                        feed_name: detail.feed.name.clone(),
-                        episode_id: ep.id.clone(),
-                        episode_title: ep.title.clone(),
-                        video_id: ep.video_id.clone(),
-                        episode_url,
-                        priority,
-                    })
-                    .await;
-            }
-            "uploading" => {
-                let episode_url =
-                    extractor::episode_url(&detail.feed.source_url, &ep.video_id);
-                state
-                    .sync_channels
-                    .send_upload(Job {
                         feed_id: feed_id.to_string(),
                         feed_name: detail.feed.name.clone(),
                         episode_id: ep.id.clone(),
@@ -136,6 +122,7 @@ pub async fn start_periodic_sync(state: &AppState) -> Result<(), AppError> {
                 }
             };
             run_sync_for_feeds(&state_scan, &feeds, 5, Priority::High).await;
+            requeue_incomplete(&state_scan, Priority::High).await;
             last_scan = Some(tokio::time::Instant::now());
         }
     }));
@@ -178,7 +165,7 @@ pub async fn auto_start_sync(state: &AppState) {
         return;
     }
 
-    startup_recovery(state).await;
+    requeue_incomplete(state, Priority::Normal).await;
 
     if let Err(e) = start_periodic_sync(state).await {
         log::warn!("Auto-start sync failed: {e}");
@@ -186,18 +173,31 @@ pub async fn auto_start_sync(state: &AppState) {
     }
 }
 
-/// Fetch all not-ready episodes and push them to channels as Normal priority.
-async fn startup_recovery(state: &AppState) {
-    let feeds = match feeds_service::fetch_all_feeds(state).await {
-        Ok(f) => f,
+/// Fetch all incomplete episodes in one request and push them to the download channel.
+async fn requeue_incomplete(state: &AppState, priority: Priority) {
+    let episodes = match episode_service::fetch_incomplete(state).await {
+        Ok(eps) => eps,
         Err(e) => {
-            log::warn!("Failed to fetch feeds: {e}");
+            log::warn!("Failed to fetch incomplete episodes: {e}");
             return;
         }
     };
 
-    for feed in &feeds {
-        push_feed_episodes(state, &feed.id, Priority::Normal).await;
+    log::info!("Requeue incomplete: {} episodes at {:?} priority", episodes.len(), priority);
+    for ep in &episodes {
+        let episode_url = extractor::episode_url(&ep.feed_source_url, &ep.video_id);
+        state
+            .sync_channels
+            .send_download(Job {
+                feed_id: ep.feed_id.clone(),
+                feed_name: ep.feed_name.clone(),
+                episode_id: ep.id.clone(),
+                episode_title: ep.title.clone(),
+                video_id: ep.video_id.clone(),
+                episode_url,
+                priority,
+            })
+            .await;
     }
 }
 

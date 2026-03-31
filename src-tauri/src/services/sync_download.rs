@@ -75,7 +75,6 @@ async fn process_download(state: &AppState, job: Job) -> Result<(), AppError> {
 
     if audio_path.exists() {
         log::info!("Already downloaded locally: {}", job.episode_title);
-        let _ = episode_service::update_status(state, episode_id, "uploading", None).await;
         state.sync_channels.send_upload(job).await;
         return Ok(());
     }
@@ -90,7 +89,6 @@ async fn process_download(state: &AppState, job: Job) -> Result<(), AppError> {
 
     match extractor::download_audio(state, &ep_url, &job.video_id, &temp_dir).await {
         Ok(_) => {
-            let _ = episode_service::update_status(state, episode_id, "uploading", None).await;
             state.sync_channels.send_upload(job).await;
         }
         Err(e) => {

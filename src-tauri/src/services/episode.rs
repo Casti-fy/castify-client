@@ -1,5 +1,5 @@
 use crate::error::AppError;
-use crate::models::{CreateEpisodeRequest, CreateEpisodeResponse, UpdateEpisodeMetadataRequest, UpdateEpisodeRequest, UploadURLResponse};
+use crate::models::{CreateEpisodeRequest, CreateEpisodeResponse, IncompleteEpisode, UpdateEpisodeMetadataRequest, UpdateEpisodeRequest, UploadURLResponse};
 use crate::state::AppState;
 
 pub async fn create_episode(
@@ -51,6 +51,12 @@ pub async fn update_metadata(
         true,
     )
     .await
+}
+
+pub async fn fetch_incomplete(state: &AppState) -> Result<Vec<IncompleteEpisode>, AppError> {
+    let api = state.api.read().await;
+    api.request::<Vec<IncompleteEpisode>>("/api/v1/episodes?status=pending,failed", "GET", true)
+        .await
 }
 
 pub async fn get_upload_url(

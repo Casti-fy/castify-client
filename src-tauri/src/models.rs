@@ -50,6 +50,25 @@ pub struct Episode {
     pub status: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IncompleteEpisode {
+    pub id: String,
+    #[serde(rename = "feed_id")]
+    pub feed_id: String,
+    #[serde(rename = "feed_name")]
+    pub feed_name: String,
+    #[serde(rename = "feed_source_url")]
+    pub feed_source_url: String,
+    #[serde(rename = "video_id")]
+    pub video_id: String,
+    pub title: String,
+    pub status: String,
+    #[serde(rename = "pub_date")]
+    pub pub_date: Option<String>,
+    #[serde(rename = "duration_sec")]
+    pub duration_sec: Option<i64>,
+}
+
 // -- Request types --
 
 #[derive(Debug, Serialize)]

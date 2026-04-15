@@ -17,10 +17,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: macos-14
+          - platform: macos-15
             target: aarch64-apple-darwin
             args: --target aarch64-apple-darwin
-          # Use macos-15-intel for x86_64: macos-14 is ARM64, and PyInstaller
+          # Use macos-15-intel for x86_64: macos-15 is ARM64, and PyInstaller
           # builds for the host arch, so an ARM runner would produce an ARM binary
           # mislabeled as x86_64 → "bad CPU type in executable" on Intel Macs.
           - platform: macos-15-intel

@@ -77,13 +77,15 @@ jobs:
             libjavascriptcoregtk-4.1-dev \
             build-essential
 
-      # Windows: MSYS2 with mingw-w64 for building ffmpeg from source
+      # Windows: MSYS2 with mingw-w64 for building ffmpeg from source.
+      # update:false + manual keyring refresh below avoids the stale-keyring
+      # signature failure that hits whenever MSYS2 rotates signing keys.
       - name: Setup MSYS2
         if: matrix.platform == 'windows-latest'
         uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
-          update: true
+          update: false
           install: >-
             git
             curl
@@ -93,6 +95,13 @@ jobs:
             mingw-w64-ucrt-x86_64-nasm
             mingw-w64-ucrt-x86_64-python
             mingw-w64-ucrt-x86_64-python-pip
+
+      - name: Refresh MSYS2 keyring and update
+        if: matrix.platform == 'windows-latest'
+        shell: msys2 {0}
+        run: |
+          pacman -Sy --noconfirm --needed msys2-keyring
+          pacman -Syu --noconfirm
 
       - name: Install Python
         uses: actions/setup-python@v5

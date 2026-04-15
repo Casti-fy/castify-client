@@ -28,6 +28,8 @@ pub struct Feed {
     pub artwork_url: Option<String>,
     #[serde(rename = "feed_slug")]
     pub feed_slug: String,
+    #[serde(rename = "fetch_order", default = "default_fetch_order")]
+    pub fetch_order: String,
     #[serde(rename = "feed_url", default)]
     pub feed_url: String,
     #[serde(rename = "episode_count", default)]
@@ -89,6 +91,8 @@ pub struct CreateFeedRequest {
     #[serde(rename = "source_url")]
     pub source_url: String,
     pub description: Option<String>,
+    #[serde(rename = "fetch_order")]
+    pub fetch_order: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -187,6 +191,7 @@ pub struct PlaylistEntry {
     pub availability: Option<String>, // youtube, subscriber_only, needs_premium
     pub duration: Option<f64>,
     pub description: Option<String>,
+    pub view_count: Option<u64>,
     pub extractor: Option<String>,
 }
 
@@ -206,6 +211,10 @@ impl PlaylistEntry {
         let dt = Utc.timestamp_opt(self.timestamp.unwrap_or(0), 0).single()?;
         Some(dt.format("%Y-%m-%dT%H:%M:%SZ").to_string())
     }
+}
+
+fn default_fetch_order() -> String {
+    "newest".to_string()
 }
 
 // -- Event payloads --

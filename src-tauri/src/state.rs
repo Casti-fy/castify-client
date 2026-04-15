@@ -28,6 +28,7 @@ pub struct Job {
     pub episode_title: String,
     pub video_id: String,
     pub episode_url: String,
+    pub pub_date: Option<String>,
     pub priority: Priority,
 }
 

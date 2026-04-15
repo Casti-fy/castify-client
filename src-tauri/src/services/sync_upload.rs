@@ -39,7 +39,14 @@ async fn process_upload(state: &AppState, job: Job) -> Result<(), AppError> {
         &format!("Uploading: {}", job.episode_title),
     );
 
+    if state.cancelled_feeds.read().await.contains(&job.feed_id) {
+        return Ok(());
+    }
+
     for attempt in 1..=UPLOAD_MAX_ATTEMPTS {
+        if state.cancelled_feeds.read().await.contains(&job.feed_id) {
+            return Ok(());
+        }
         let url_resp: UploadURLResponse =
             match episode_service::get_upload_url(state, episode_id).await {
                 Ok(r) => r,
@@ -130,9 +137,7 @@ pub async fn start_upload_worker(state: AppState, mut channels: ChannelReceivers
             }
         };
 
-        if state.cancelled_feeds.read().await.contains(&job.feed_id) {
-            continue;
-        }
+        
 
         if !seen.insert(job.episode_id.clone()) {
             continue;

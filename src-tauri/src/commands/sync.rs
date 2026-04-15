@@ -14,6 +14,12 @@ pub async fn sync_feed(app: AppHandle, feed_id: String) -> Result<(), AppError> 
 }
 
 #[tauri::command]
+pub async fn backfill_feed(app: AppHandle, feed_id: String, start: u32, end: u32) -> Result<(), AppError> {
+    let state = app.state::<AppState>();
+    sync_service::backfill_feed(&state, &feed_id, start, end).await
+}
+
+#[tauri::command]
 pub async fn get_sync_interval(app: AppHandle) -> Result<u64, AppError> {
     let state = app.state::<AppState>();
     Ok(sync_service::read_sync_interval(&state))

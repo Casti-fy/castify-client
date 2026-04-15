@@ -200,27 +200,66 @@ async fn run_sidecar(
     Ok((exit_code, stdout, stderr))
 }
 
+/// Playlist sort order for YouTube channels.
+#[derive(Debug, Clone, Copy, Default)]
+pub enum PlaylistOrder {
+    #[default]
+    Newest,
+    Oldest,
+    Popular,
+}
+
 /// Pass 1: Fetch playlist entries. Uses flat-playlist for YouTube (fast, metadata
 /// comes in pass 2) and full playlist for SoundCloud (flat mode lacks titles).
 pub async fn fetch_playlist(
     state: &AppState,
     url: &str,
-    max_items: u32,
+    start: u32,
+    end: u32,
+    order: PlaylistOrder,
+    language: Option<&str>,
 ) -> Result<Vec<PlaylistEntry>, AppError> {
     // yt-dlp --flat-playlist --dump-json --playlist-end 10 https://www.youtube.com/@TuanTienTi2911
     // yt-dlp --flat-playlist --dump-json --playlist-end 10 https://www.youtube.com/@dinhcuhanoi # likely have premier
     // yt-dlp --flat-playlist --dump-json --playlist-end 10 https://www.youtube.com/@VTCNewstintuc # likely have live
+    // sort order: newest (sort=dd), oldest (sort=da), popular (sort=p)
+    // yt-dlp --flat-playlist --dump-json --playlist-end 10 "https://www.youtube.com/@TuanTienTi2911/videos?view=0&sort=p"
 
     let mut args = vec!["--ignore-errors".to_string()];
     args.extend(ytdlp_base_args(state));
 
+    // Ensure YouTube channel URLs point to /videos tab
+    let effective_url = ensure_videos_tab(url);
+
+    // For oldest/popular, fetch a larger window so we can sort client-side.
+    // yt-dlp ignores YouTube sort URL params (?sort=da, ?sort=p), so we
+    // always fetch newest-first and re-order in Rust.
+    let needs_client_sort = matches!(order, PlaylistOrder::Oldest | PlaylistOrder::Popular);
+    let fetch_end = if needs_client_sort {
+        // Fetch a bigger batch to sort from; cap at 200 to avoid very long waits
+        (end * 10).max(100).min(200)
+    } else {
+        end
+    };
+
     args.extend([
-        "--flat-playlist".to_string(), // less error
+        "--flat-playlist".to_string(),
         "--dump-json".to_string(),
-        "--playlist-end".to_string(),
-        max_items.to_string(),
-        url.to_string(),
     ]);
+
+    if start > 0 {
+        args.extend(["--playlist-start".to_string(), (start + 1).to_string()]);
+    }
+    args.extend(["--playlist-end".to_string(), fetch_end.to_string()]);
+
+    if let Some(lang) = language {
+        args.extend([
+            "--extractor-args".to_string(),
+            format!("youtube:lang={lang}"),
+        ]);
+    }
+
+    args.push(effective_url);
 
     let (code, stdout, stderr) = run_sidecar(state, "binaries/yt-dlp", args).await?;
 
@@ -238,7 +277,24 @@ pub async fn fetch_playlist(
             && entry.availability.as_deref().map(|a| a == "public").unwrap_or(true)
     });
 
-    log::info!("[fetch_playlist] got {} entries", entries.len());
+    // Client-side sort since yt-dlp ignores YouTube sort URL params
+    match order {
+        PlaylistOrder::Popular => {
+            entries.sort_by(|a, b| b.view_count.unwrap_or(0).cmp(&a.view_count.unwrap_or(0)));
+        }
+        PlaylistOrder::Oldest => {
+            entries.reverse();
+        }
+        PlaylistOrder::Newest => {}
+    }
+
+    // Trim back to the originally requested count
+    let limit = (end - start) as usize;
+    if entries.len() > limit {
+        entries.truncate(limit);
+    }
+
+    log::info!("[fetch_playlist] got {} entries (order: {:?})", entries.len(), order);
     Ok(entries)
 }
 
@@ -253,20 +309,33 @@ pub fn episode_url(feed_source_url: &str, video_id: &str) -> String {
     }
 }
 
-/// Pass 2: Fetch full metadata for a single episode by URL.
-#[allow(dead_code)]
-pub async fn fetch_video_metadata(
+
+/// Fetch the actual pub_date for an episode if its current pub_date is missing or before 2000-01-01.
+/// Uses yt-dlp --dump-json to fetch full metadata and extract upload_date.
+/// Returns Some(pub_date) in ISO 8601 format if patched, None if no patch needed.
+pub async fn patch_pub_date(
     state: &AppState,
-    url: &str,
-) -> Result<PlaylistEntry, AppError> {
-    // yt-dlp --dump-json --skip-download --no-playlist https://www.youtube.com/watch?v=TjUhXbGdLYo
+    episode_url: &str,
+    current_pub_date: Option<&str>,
+) -> Result<Option<String>, AppError> {
+    // yt-dlp --dump-json --no-download --no-warnings https://www.youtube.com/watch?v=VIDEO_ID
+
+    let needs_patch = match current_pub_date {
+        None => true,
+        Some(d) => d < "2000-01-01",
+    };
+    if !needs_patch {
+        return Ok(None);
+    }
+
     let mut args = vec!["--ignore-errors".to_string()];
     args.extend(ytdlp_base_args(state));
     args.extend([
         "--dump-json".to_string(),
-        "--skip-download".to_string(),
+        "--no-download".to_string(),
+        "--no-warnings".to_string(),
         "--no-playlist".to_string(),
-        url.to_string(),
+        episode_url.to_string(),
     ]);
 
     let (code, stdout, stderr) = run_sidecar(state, "binaries/yt-dlp", args).await?;
@@ -277,9 +346,74 @@ pub async fn fetch_video_metadata(
         )));
     }
 
+    // Parse JSON and extract upload_date ("YYYYMMDD")
     let line = stdout.lines().find(|l| !l.is_empty()).unwrap_or("");
-    serde_json::from_str(line)
-        .map_err(|e| AppError::Other(format!("parse video metadata: {e}")))
+    let data: serde_json::Value = serde_json::from_str(line)
+        .map_err(|e| AppError::Other(format!("parse yt-dlp json: {e}")))?;
+
+    let upload_date = match data.get("upload_date").and_then(|v| v.as_str()) {
+        Some(d) if d.len() >= 8 => d,
+        _ => {
+            log::warn!("[patch_pub_date] no upload_date for {episode_url}");
+            return Ok(None);
+        }
+    };
+
+    // Convert "YYYYMMDD" to "YYYY-MM-DDT00:00:00Z"
+    let iso = format!(
+        "{}-{}-{}T00:00:00Z",
+        &upload_date[..4],
+        &upload_date[4..6],
+        &upload_date[6..8],
+    );
+    log::info!("[patch_pub_date] {episode_url} -> {iso}");
+    Ok(Some(iso))
+}
+
+/// Detect the channel's language by fetching full metadata for its first video.
+/// Returns the language code (e.g. "vi", "en", "ja") or None if unavailable.
+pub async fn detect_channel_language(
+    state: &AppState,
+    url: &str,
+) -> Option<String> {
+    // yt-dlp --dump-json --skip-download --no-warnings --playlist-end 1 https://www.youtube.com/@dinhcuhanoi/videos
+    let mut args = vec!["--ignore-errors".to_string()];
+    args.extend(ytdlp_base_args(state));
+    args.extend([
+        "--dump-json".to_string(),
+        "--skip-download".to_string(),
+        "--no-warnings".to_string(),
+        "--playlist-end".to_string(),
+        "1".to_string(),
+        url.to_string(),
+    ]);
+
+    let (code, stdout, _) = run_sidecar(state, "binaries/yt-dlp", args).await.ok()?;
+    if code != 0 {
+        return None;
+    }
+
+    let line = stdout.lines().find(|l| !l.is_empty())?;
+    let data: serde_json::Value = serde_json::from_str(line).ok()?;
+    let lang = data.get("language")?.as_str()?.to_string();
+    log::info!("[detect_channel_language] {url} -> {lang}");
+    Some(lang)
+}
+
+fn is_youtube_channel(url: &str) -> bool {
+    url.contains("youtube.com/@") || url.contains("youtube.com/channel/")
+}
+
+fn ensure_videos_tab(url: &str) -> String {
+    if !is_youtube_channel(url) {
+        return url.to_string();
+    }
+    let base = url.trim_end_matches('/');
+    if base.ends_with("/videos") {
+        base.to_string()
+    } else {
+        format!("{base}/videos")
+    }
 }
 
 fn parse_playlist_lines(stdout: &str) -> Vec<PlaylistEntry> {

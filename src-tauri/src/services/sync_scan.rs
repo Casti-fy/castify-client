@@ -3,17 +3,24 @@ use std::time::Duration;
 
 use crate::error::AppError;
 use crate::models::{CreateEpisodeRequest, Feed, PlaylistEntry};
-use crate::services::{episode as episode_service, extractor, feeds as feeds_service, helpers};
+use crate::services::{episode as episode_service, extractor, extractor::PlaylistOrder, feeds as feeds_service, helpers};
 use crate::state::{AppState, Job, Priority};
 
 const SCAN_FEED_SPACING: Duration = Duration::from_secs(2);
 
-pub async fn run_scan(state: &AppState, feeds: &[Feed], max_items: u32, priority: Priority) {
+pub async fn run_scan(
+    state: &AppState,
+    feeds: &[Feed],
+    start: u32,
+    end: u32,
+    order: PlaylistOrder,
+    priority: Priority,
+) {
     for (i, feed) in feeds.iter().enumerate() {
         if i > 0 {
             tokio::time::sleep(SCAN_FEED_SPACING).await;
         }
-        if let Err(e) = scan_feed(state, feed, max_items, priority).await {
+        if let Err(e) = scan_feed(state, feed, start, end, order, priority).await {
             log::warn!("Scan feed {} failed: {e}", feed.name);
         }
     }
@@ -22,16 +29,21 @@ pub async fn run_scan(state: &AppState, feeds: &[Feed], max_items: u32, priority
 async fn scan_feed(
     state: &AppState,
     feed: &Feed,
-    max_items: u32,
+    start: u32,
+    end: u32,
+    order: PlaylistOrder,
     priority: Priority,
 ) -> Result<(), AppError> {
     helpers::emit_progress(state, &feed.id, &feed.name, "fetch", "Fetching playlist...");
     let detail = feeds_service::fetch_feed_detail(state, &feed.id).await?;
 
+    // Detect channel language so titles are fetched in the original language
+    // let language = extractor::detect_channel_language(state, &feed.source_url).await;
+
     let existing_ids: HashSet<String> =
         detail.episodes.iter().map(|e| e.video_id.clone()).collect();
 
-    let entries = extractor::fetch_playlist(state, &feed.source_url, max_items).await?;
+    let entries = extractor::fetch_playlist(state, &feed.source_url, start, end, order, None).await?;
     let new_entries: Vec<&PlaylistEntry> = entries
         .iter()
         .filter(|e| e.id.as_ref().map_or(true, |id| !existing_ids.contains(id)))
@@ -67,7 +79,7 @@ async fn scan_feed(
 
         match episode_service::create_episode(state, &feed.id, &create_body).await {
             Ok(resp) => {
-                let episode_id = resp.episode.id;
+                let episode_id = resp.episode.id.clone();
                 let episode_title = resp.episode.title.clone();
                 let video_id = resp.episode.video_id.clone();
                 let episode_url = extractor::episode_url(&feed.source_url, &video_id);
@@ -81,6 +93,7 @@ async fn scan_feed(
                         episode_title,
                         video_id,
                         episode_url,
+                        pub_date: resp.episode.pub_date,
                         priority,
                     })
                     .await;

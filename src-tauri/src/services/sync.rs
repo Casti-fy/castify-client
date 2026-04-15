@@ -2,10 +2,18 @@ use std::time::Duration;
 
 use crate::error::AppError;
 use crate::models::Feed;
-use crate::services::{episode as episode_service, extractor, feeds as feeds_service};
+use crate::services::{episode as episode_service, extractor, extractor::PlaylistOrder, feeds as feeds_service};
 use crate::state::{AppState, Job, Priority};
 
 use super::{sync_download, sync_scan, sync_upload};
+
+fn parse_playlist_order(s: &str) -> PlaylistOrder {
+    match s {
+        "oldest" => PlaylistOrder::Oldest,
+        "popular" => PlaylistOrder::Popular,
+        _ => PlaylistOrder::Newest,
+    }
+}
 
 
 /// Push a feed's not-ready episodes to channels with the given priority.
@@ -33,6 +41,7 @@ pub async fn push_feed_episodes(state: &AppState, feed_id: &str, priority: Prior
                         episode_title: ep.title.clone(),
                         video_id: ep.video_id.clone(),
                         episode_url,
+                        pub_date: ep.pub_date.clone(),
                         priority,
                     })
                     .await;
@@ -61,7 +70,8 @@ pub async fn scan_new_feed(state: &AppState, feed: &Feed) {
     });
 
     let feeds = [feed.clone()];
-    run_sync_for_feeds(state, &feeds, 5, Priority::Urgent).await;
+    let order = parse_playlist_order(&feed.fetch_order);
+    run_sync_for_feeds(state, &feeds, 0, 5, order, Priority::Urgent).await;
     let _ = artwork_handle.await;
 }
 
@@ -70,17 +80,29 @@ pub async fn sync_single_feed(state: &AppState, feed_id: &str) -> Result<(), App
     let detail = feeds_service::fetch_feed_detail(state, feed_id).await?;
     let feed = detail.feed.clone();
     push_feed_episodes(state, feed_id, Priority::Urgent).await;
-    run_sync_for_feeds(state, &[feed], 20, Priority::Urgent).await;
+    let order = parse_playlist_order(&feed.fetch_order);
+    run_sync_for_feeds(state, &[feed], 0, 20, order, Priority::Urgent).await;
+    Ok(())
+}
+
+/// Backfill older episodes from a feed's playlist using a custom index range.
+pub async fn backfill_feed(state: &AppState, feed_id: &str, start: u32, end: u32) -> Result<(), AppError> {
+    let detail = feeds_service::fetch_feed_detail(state, feed_id).await?;
+    let feed = detail.feed.clone();
+    let order = parse_playlist_order(&feed.fetch_order);
+    run_sync_for_feeds(state, &[feed], start, end, order, Priority::Normal).await;
     Ok(())
 }
 
 pub async fn run_sync_for_feeds(
     state: &AppState,
     feeds: &[Feed],
-    max_scan_items: u32,
+    start: u32,
+    end: u32,
+    order: PlaylistOrder,
     priority: Priority,
 ) {
-    sync_scan::run_scan(state, feeds, max_scan_items, priority).await;
+    sync_scan::run_scan(state, feeds, start, end, order, priority).await;
 }
 
 // ----- Settings helpers -----
@@ -121,7 +143,10 @@ pub async fn start_periodic_sync(state: &AppState) -> Result<(), AppError> {
                     continue;
                 }
             };
-            run_sync_for_feeds(&state_scan, &feeds, 5, Priority::High).await;
+            for feed in &feeds {
+                let order = parse_playlist_order(&feed.fetch_order);
+                run_sync_for_feeds(&state_scan, &[feed.clone()], 0, 5, order, Priority::High).await;
+            }
             requeue_incomplete(&state_scan, Priority::High).await;
             last_scan = Some(tokio::time::Instant::now());
         }
@@ -195,6 +220,7 @@ async fn requeue_incomplete(state: &AppState, priority: Priority) {
                 episode_title: ep.title.clone(),
                 video_id: ep.video_id.clone(),
                 episode_url,
+                pub_date: ep.pub_date.clone(),
                 priority,
             })
             .await;

@@ -28,12 +28,14 @@ export const listFeeds = () => invoke<Feed[]>("list_feeds");
 export const createFeed = (
   name: string,
   sourceUrl: string,
-  description?: string
+  description?: string,
+  fetchOrder?: string
 ) =>
   invoke<CreateFeedResponse>("create_feed", {
     name,
     sourceUrl,
     description: description || null,
+    fetchOrder: fetchOrder || "newest",
   });
 
 export const getFeedDetail = (feedId: string) =>
@@ -45,6 +47,9 @@ export const deleteFeed = (feedId: string) =>
 // Sync
 export const syncFeed = (feedId: string) =>
   invoke<void>("sync_feed", { feedId });
+
+export const backfillFeed = (feedId: string, start: number, end: number) =>
+  invoke<void>("backfill_feed", { feedId, start, end });
 
 export const getSyncInterval = () => invoke<number>("get_sync_interval");
 

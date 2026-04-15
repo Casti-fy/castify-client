@@ -17,9 +17,11 @@ pub async fn create_feed(
     name: String,
     source_url: String,
     description: Option<String>,
+    fetch_order: Option<String>,
 ) -> Result<CreateFeedResponse, AppError> {
     let state = app.state::<AppState>();
-    feeds_service::create_feed(&state, name, source_url, description).await
+    let order = fetch_order.unwrap_or_else(|| "newest".to_string());
+    feeds_service::create_feed(&state, name, source_url, description, order).await
 }
 
 #[tauri::command]

@@ -19,7 +19,9 @@ export interface Feed {
   source_url: string;
   description?: string;
   feed_slug: string;
+  fetch_order: string;
   feed_url: string;
+  artwork_url?: string;
   episode_count?: number;
 }
 

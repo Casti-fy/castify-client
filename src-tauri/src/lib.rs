@@ -126,6 +126,7 @@ pub fn run() {
             commands::feeds::get_feed_detail,
             commands::feeds::delete_feed,
             commands::sync::sync_feed,
+            commands::sync::backfill_feed,
             commands::sync::get_sync_interval,
             commands::sync::set_sync_interval,
             commands::sync::clear_sync_cache,

@@ -14,11 +14,13 @@ pub async fn create_feed(
     name: String,
     source_url: String,
     description: Option<String>,
+    fetch_order: String,
 ) -> Result<CreateFeedResponse, AppError> {
     let body = CreateFeedRequest {
         name,
         source_url,
         description,
+        fetch_order,
     };
     let api = state.api.read().await;
     let resp = api

@@ -5,6 +5,7 @@ use std::time::Duration;
 use rand::Rng;
 
 use crate::error::AppError;
+use crate::models::UpdateEpisodeMetadataRequest;
 use crate::services::{episode as episode_service, extractor, helpers};
 use crate::state::{AppState, ChannelReceivers, Job, Priority};
 
@@ -27,9 +28,7 @@ pub async fn start_download_worker(state: AppState, mut channels: ChannelReceive
             }
         };
 
-        if state.cancelled_feeds.read().await.contains(&job.feed_id) {
-            continue;
-        }
+        
 
         let seen_key = format!("{}:{}", job.feed_id, job.video_id);
         if !seen.insert(seen_key) {
@@ -73,10 +72,31 @@ async fn process_download(state: &AppState, job: Job) -> Result<(), AppError> {
     let audio_path = temp_dir.join(format!("{}.m4a", job.video_id));
     let ep_url = job.episode_url.clone();
 
+    if state.cancelled_feeds.read().await.contains(&job.feed_id) {
+        log::info!("Feed cancelled, skipping download: {}", job.episode_title);
+        return Ok(());
+    }
+
     if audio_path.exists() {
         log::info!("Already downloaded locally: {}", job.episode_title);
         state.sync_channels.send_upload(job).await;
         return Ok(());
+    }
+
+    // Patch pub_date if missing or before 2000-01-01 (yt-dlp --dump-json for real upload_date)
+    match extractor::patch_pub_date(state, &ep_url, job.pub_date.as_deref()).await {
+        Ok(Some(pub_date)) => {
+            let body = UpdateEpisodeMetadataRequest {
+                description: None,
+                pub_date: Some(pub_date),
+                duration_sec: None,
+            };
+            if let Err(e) = episode_service::update_metadata(state, episode_id, &body).await {
+                log::warn!("[patch_pub_date] failed to update episode {episode_id}: {e}");
+            }
+        }
+        Ok(None) => {}
+        Err(e) => log::warn!("[patch_pub_date] failed for {ep_url}: {e}"),
     }
 
     helpers::emit_progress(
@@ -86,10 +106,13 @@ async fn process_download(state: &AppState, job: Job) -> Result<(), AppError> {
         "download",
         &format!("Downloading: {}", job.episode_title),
     );
+    let _ = episode_service::update_status(state, episode_id, "pending", None).await;
 
     match extractor::download_audio(state, &ep_url, &job.video_id, &temp_dir).await {
         Ok(_) => {
-            state.sync_channels.send_upload(job).await;
+            if !state.cancelled_feeds.read().await.contains(&job.feed_id) {
+                state.sync_channels.send_upload(job).await;
+            }
         }
         Err(e) => {
             let err_str = e.to_string();

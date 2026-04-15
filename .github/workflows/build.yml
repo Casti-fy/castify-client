@@ -17,16 +17,16 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: macos-latest
+          - platform: macos-14
             target: aarch64-apple-darwin
             args: --target aarch64-apple-darwin
-          # Use macos-15-intel for x86_64: macos-latest is ARM64, and PyInstaller
+          # Use macos-15-intel for x86_64: macos-14 is ARM64, and PyInstaller
           # builds for the host arch, so an ARM runner would produce an ARM binary
           # mislabeled as x86_64 → "bad CPU type in executable" on Intel Macs.
           - platform: macos-15-intel
             target: x86_64-apple-darwin
             args: --target x86_64-apple-darwin
-          - platform: windows-latest
+          - platform: windows-2022
             target: x86_64-pc-windows-msvc
             args: --target x86_64-pc-windows-msvc
           - platform: ubuntu-22.04
@@ -81,7 +81,7 @@ jobs:
       # update:false + manual keyring refresh below avoids the stale-keyring
       # signature failure that hits whenever MSYS2 rotates signing keys.
       - name: Setup MSYS2
-        if: matrix.platform == 'windows-latest'
+        if: matrix.platform == 'windows-2022'
         uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
@@ -97,7 +97,7 @@ jobs:
             mingw-w64-ucrt-x86_64-python-pip
 
       - name: Refresh MSYS2 keyring and update
-        if: matrix.platform == 'windows-latest'
+        if: matrix.platform == 'windows-2022'
         shell: msys2 {0}
         run: |
           pacman -Sy --noconfirm --needed msys2-keyring
@@ -113,12 +113,12 @@ jobs:
 
       # Build sidecar binaries (yt-dlp + minimal ffmpeg + deno runtime)
       - name: Build sidecar binaries (Unix)
-        if: matrix.platform != 'windows-latest'
+        if: matrix.platform != 'windows-2022'
         shell: bash
         run: bash scripts/build-dependencies.sh --target ${{ matrix.target }}
 
       - name: Build sidecar binaries (Windows)
-        if: matrix.platform == 'windows-latest'
+        if: matrix.platform == 'windows-2022'
         shell: msys2 {0}
         run: |
           cd "$GITHUB_WORKSPACE"

@@ -15,8 +15,18 @@ pub struct ApiClient {
 
 impl ApiClient {
     pub fn new(base_url: &str, token: Option<String>) -> Self {
+        let user_agent = format!(
+            "castify-client/{} ({}; {})",
+            env!("CARGO_PKG_VERSION"),
+            std::env::consts::OS,
+            std::env::consts::ARCH,
+        );
+        let client = Client::builder()
+            .user_agent(user_agent)
+            .build()
+            .expect("failed to build reqwest client");
         Self {
-            client: Client::new(),
+            client,
             base_url: base_url.to_string(),
             token,
             on_unauthorized: None,

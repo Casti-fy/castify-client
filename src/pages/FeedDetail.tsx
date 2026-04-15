@@ -3,6 +3,7 @@ import type { Episode, FeedDetailResponse, SyncProgressEvent, User } from "../li
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useTauriListener } from "../hooks/useTauriListener";
 import ConfirmModal from "../components/ConfirmModal";
+import ListenOnButtons from "../components/ListenOnButtons";
 import * as api from "../lib/api";
 
 interface Props {
@@ -17,11 +18,19 @@ function formatDuration(sec: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+function formatDate(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
 export default function FeedDetail({ feedId, user, onBack }: Props) {
   const limits = user.limits;
   const [detail, setDetail] = useState<FeedDetailResponse | null>(null);
   const [search, setSearch] = useState("");
   const [syncing, setSyncing] = useState(false);
+  const [backfilling, setBackfilling] = useState(false);
+  const [backfillCursor, setBackfillCursor] = useState(20);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [showConfirmDelete, setShowConfirmDelete] = useState(false);
   const { copiedId, copy } = useCopyToClipboard();
@@ -50,6 +59,20 @@ export default function FeedDetail({ feedId, user, onBack }: Props) {
       console.error(err);
     } finally {
       setSyncing(false);
+    }
+  };
+
+  const handleBackfill = async () => {
+    const BATCH = 30;
+    setBackfilling(true);
+    try {
+      await api.backfillFeed(feedId, backfillCursor, backfillCursor + BATCH);
+      setBackfillCursor((prev) => prev + BATCH);
+      load();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setBackfilling(false);
     }
   };
 
@@ -92,16 +115,7 @@ export default function FeedDetail({ feedId, user, onBack }: Props) {
 
         <div className="feed-meta">
           <span>{detail.episodes.length} episode{detail.episodes.length !== 1 ? "s" : ""}</span>
-        </div>
-
-        <div className="feed-url-bar">
-          <code>{detail.feed_url}</code>
-          <button
-            className={`btn small${copiedId ? " btn-copied" : ""}`}
-            onClick={() => copy(detail.feed_url)}
-          >
-            {copiedId ? "Copied!" : "Copy RSS"}
-          </button>
+          <ListenOnButtons feedUrl={detail.feed_url} onCopyRss={() => copy(detail.feed_url)} rssCopied={!!copiedId} />
         </div>
 
         {limits.retention_days > 0 && (
@@ -136,11 +150,11 @@ export default function FeedDetail({ feedId, user, onBack }: Props) {
           <li key={ep.id} className="episode-item">
             <div className="episode-info">
               <strong>{ep.title}</strong>
-              {ep.duration_sec && (
-                <span className="secondary">
-                  {formatDuration(ep.duration_sec)}
-                </span>
-              )}
+              <span className="secondary">
+                {ep.pub_date && formatDate(ep.pub_date)}
+                {ep.pub_date && ep.duration_sec ? " \u00b7 " : ""}
+                {ep.duration_sec ? formatDuration(ep.duration_sec) : ""}
+              </span>
             </div>
             <div className="episode-status">
               <span
@@ -155,6 +169,12 @@ export default function FeedDetail({ feedId, user, onBack }: Props) {
           <li className="empty">No episodes yet. Click Refresh to sync.</li>
         )}
       </ul>
+
+      <div className="fetch-history-section">
+        <button className="btn" onClick={handleBackfill} disabled={backfilling || syncing}>
+          {backfilling ? "Fetching..." : "Fetch More Episodes"}
+        </button>
+      </div>
 
       {showConfirmDelete && (
         <ConfirmModal

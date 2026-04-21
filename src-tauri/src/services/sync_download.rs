@@ -83,20 +83,22 @@ async fn process_download(state: &AppState, job: Job) -> Result<(), AppError> {
         return Ok(());
     }
 
-    // Patch pub_date if missing or before 2000-01-01 (yt-dlp --dump-json for real upload_date)
-    match extractor::patch_pub_date(state, &ep_url, job.pub_date.as_deref()).await {
-        Ok(Some(pub_date)) => {
+    // One yt-dlp --dump-json call gives us pub_date (when missing/ancient) and
+    // chapters (when authored). PATCH only the fields actually present.
+    match extractor::fetch_episode_metadata(state, &ep_url, job.pub_date.as_deref()).await {
+        Ok(meta) if meta.pub_date_patch.is_some() || meta.chapters.is_some() => {
             let body = UpdateEpisodeMetadataRequest {
                 description: None,
-                pub_date: Some(pub_date),
+                pub_date: meta.pub_date_patch,
                 duration_sec: None,
+                chapters: meta.chapters,
             };
             if let Err(e) = episode_service::update_metadata(state, episode_id, &body).await {
-                log::warn!("[patch_pub_date] failed to update episode {episode_id}: {e}");
+                log::warn!("[fetch_episode_metadata] failed to update episode {episode_id}: {e}");
             }
         }
-        Ok(None) => {}
-        Err(e) => log::warn!("[patch_pub_date] failed for {ep_url}: {e}"),
+        Ok(_) => {}
+        Err(e) => log::warn!("[fetch_episode_metadata] failed for {ep_url}: {e}"),
     }
 
     helpers::emit_progress(

@@ -128,6 +128,8 @@ pub struct UpdateEpisodeMetadataRequest {
     pub pub_date: Option<String>,
     #[serde(rename = "duration_sec", skip_serializing_if = "Option::is_none")]
     pub duration_sec: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chapters: Option<serde_json::Value>,
 }
 
 // -- Response types --

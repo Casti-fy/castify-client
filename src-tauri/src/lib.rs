@@ -29,6 +29,9 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
+            // Clear any leftover temp audio from prior runs before sync kicks off.
+            services::helpers::clear_all_temp_dirs();
+
             // Create platform-specific config store and AppState
             let store: std::sync::Arc<dyn services::config_store::ConfigStore> =
                 std::sync::Arc::new(services::tauri_store::TauriConfigStore::new(app.handle()));

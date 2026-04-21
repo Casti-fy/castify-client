@@ -310,23 +310,25 @@ pub fn episode_url(feed_source_url: &str, video_id: &str) -> String {
 }
 
 
-/// Fetch the actual pub_date for an episode if its current pub_date is missing or before 2000-01-01.
-/// Uses yt-dlp --dump-json to fetch full metadata and extract upload_date.
-/// Returns Some(pub_date) in ISO 8601 format if patched, None if no patch needed.
-pub async fn patch_pub_date(
+/// Per-episode metadata that the flat-playlist scan can't surface — currently
+/// the canonical upload date and the chapter list. Either field may be None
+/// independently: pub_date_patch is None when the existing pub_date is already
+/// good (no patch needed), chapters is None when the video has no chapters.
+#[derive(Debug, Default)]
+pub struct EpisodeMetadata {
+    pub pub_date_patch: Option<String>,
+    pub chapters: Option<serde_json::Value>,
+}
+
+/// Fetch per-episode metadata via `yt-dlp --dump-json` (one process per call).
+/// Always runs yt-dlp because chapters can't be known up-front; pub_date patch
+/// is computed by comparing against the existing value.
+pub async fn fetch_episode_metadata(
     state: &AppState,
     episode_url: &str,
     current_pub_date: Option<&str>,
-) -> Result<Option<String>, AppError> {
+) -> Result<EpisodeMetadata, AppError> {
     // yt-dlp --dump-json --no-download --no-warnings https://www.youtube.com/watch?v=VIDEO_ID
-
-    let needs_patch = match current_pub_date {
-        None => true,
-        Some(d) => d < "2000-01-01",
-    };
-    if !needs_patch {
-        return Ok(None);
-    }
 
     let mut args = vec!["--ignore-errors".to_string()];
     args.extend(ytdlp_base_args(state));
@@ -346,28 +348,40 @@ pub async fn patch_pub_date(
         )));
     }
 
-    // Parse JSON and extract upload_date ("YYYYMMDD")
     let line = stdout.lines().find(|l| !l.is_empty()).unwrap_or("");
     let data: serde_json::Value = serde_json::from_str(line)
         .map_err(|e| AppError::Other(format!("parse yt-dlp json: {e}")))?;
 
-    let upload_date = match data.get("upload_date").and_then(|v| v.as_str()) {
-        Some(d) if d.len() >= 8 => d,
-        _ => {
-            log::warn!("[patch_pub_date] no upload_date for {episode_url}");
-            return Ok(None);
-        }
-    };
+    let mut out = EpisodeMetadata::default();
 
-    // Convert "YYYYMMDD" to "YYYY-MM-DDT00:00:00Z"
-    let iso = format!(
-        "{}-{}-{}T00:00:00Z",
-        &upload_date[..4],
-        &upload_date[4..6],
-        &upload_date[6..8],
-    );
-    log::info!("[patch_pub_date] {episode_url} -> {iso}");
-    Ok(Some(iso))
+    // pub_date patch — only if current value is missing or pre-2000.
+    let needs_patch = match current_pub_date {
+        None => true,
+        Some(d) => d < "2000-01-01",
+    };
+    if needs_patch {
+        if let Some(d) = data.get("upload_date").and_then(|v| v.as_str()) {
+            if d.len() >= 8 {
+                let iso = format!("{}-{}-{}T00:00:00Z", &d[..4], &d[4..6], &d[6..8]);
+                log::info!("[fetch_episode_metadata] {episode_url} pub_date -> {iso}");
+                out.pub_date_patch = Some(iso);
+            } else {
+                log::warn!("[fetch_episode_metadata] no usable upload_date for {episode_url}");
+            }
+        } else {
+            log::warn!("[fetch_episode_metadata] no upload_date for {episode_url}");
+        }
+    }
+
+    // Chapters — present as an array of {start_time, end_time, title} objects,
+    // or null when the creator didn't author them.
+    if let Some(chapters) = data.get("chapters") {
+        if chapters.is_array() && !chapters.as_array().map(|a| a.is_empty()).unwrap_or(true) {
+            out.chapters = Some(chapters.clone());
+        }
+    }
+
+    Ok(out)
 }
 
 /// Detect the channel's language by fetching full metadata for its first video.

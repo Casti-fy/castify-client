@@ -88,6 +88,12 @@ async fn process_upload(state: &AppState, job: Job) -> Result<(), AppError> {
                     .unwrap_or(0);
                 let _ = episode_service::update_status(state, episode_id, "ready", Some(file_size))
                     .await;
+                if let Err(e) = tokio::fs::remove_file(&audio_path).await {
+                    log::warn!(
+                        "Failed to delete local audio {} after upload: {e}",
+                        audio_path.display()
+                    );
+                }
                 helpers::emit_progress(
                     state,
                     feed_id,

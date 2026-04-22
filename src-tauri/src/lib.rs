@@ -12,6 +12,7 @@ use state::AppState;
 
 struct TrayState {
     quit_requested: std::sync::atomic::AtomicBool,
+    tray_ready: std::sync::atomic::AtomicBool,
 }
 
 pub fn run() {
@@ -43,6 +44,7 @@ pub fn run() {
             app.manage(app_state);
             app.manage(TrayState {
                 quit_requested: std::sync::atomic::AtomicBool::new(false),
+                tray_ready: std::sync::atomic::AtomicBool::new(false),
             });
 
             // Wire Tauri's event emitter to AppState so services can emit
@@ -96,11 +98,11 @@ pub fn run() {
             let quit = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
             let menu = MenuBuilder::new(app).items(&[&open, &quit]).build()?;
 
-            let tray = TrayIconBuilder::new()
+            let tray_builder = TrayIconBuilder::with_id("main")
                 .menu(&menu)
                 .tooltip("Castify")
-                .icon(app.default_window_icon().unwrap().clone())
-                .icon_as_template(false)
+                .icon(tauri::include_image!("./icons/32x32.png"))
+                .icon_as_template(true)
                 .on_tray_icon_event(|tray, event| {
                     if let tauri::tray::TrayIconEvent::Click { .. } = event {
                         let app = tray.app_handle();
@@ -127,9 +129,22 @@ pub fn run() {
                         app.exit(0);
                     }
                     _ => {}
-                })
-                .build(app)?;
-            app.manage(tray);
+                });
+
+            match tray_builder.build(app) {
+                Ok(tray) => {
+                    if let Some(state) = app.try_state::<TrayState>() {
+                        state
+                            .tray_ready
+                            .store(true, std::sync::atomic::Ordering::SeqCst);
+                    }
+                    app.manage(tray);
+                    log::info!("system tray initialized");
+                }
+                Err(err) => {
+                    log::error!("failed to initialize system tray: {err}");
+                }
+            }
 
             Ok(())
         })
@@ -153,9 +168,17 @@ pub fn run() {
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
-                // Hide the window instead of closing; app keeps running in tray
-                let _ = window.hide();
-                api.prevent_close();
+                let tray_ready = window
+                    .app_handle()
+                    .try_state::<TrayState>()
+                    .map(|state| state.tray_ready.load(std::sync::atomic::Ordering::SeqCst))
+                    .unwrap_or(false);
+
+                if tray_ready {
+                    // Hide the window instead of closing; app keeps running in tray.
+                    let _ = window.hide();
+                    api.prevent_close();
+                }
             }
         })
         .build(tauri::generate_context!())
@@ -174,10 +197,17 @@ pub fn run() {
                     return;
                 }
 
-                api.prevent_exit();
-                // Hide all windows instead of quitting
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.hide();
+                let tray_ready = app
+                    .try_state::<TrayState>()
+                    .map(|state| state.tray_ready.load(std::sync::atomic::Ordering::SeqCst))
+                    .unwrap_or(false);
+
+                if tray_ready {
+                    api.prevent_exit();
+                    // Hide all windows instead of quitting.
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.hide();
+                    }
                 }
             }
         });

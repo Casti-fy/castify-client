@@ -10,6 +10,10 @@ pub const DEFAULT_SERVER_URL: &str = "https://casti.fyi";
 
 use state::AppState;
 
+struct TrayState {
+    quit_requested: std::sync::atomic::AtomicBool,
+}
+
 pub fn run() {
     use tauri::{
         menu::{MenuBuilder, MenuItemBuilder},
@@ -37,6 +41,9 @@ pub fn run() {
                 std::sync::Arc::new(services::tauri_store::TauriConfigStore::new(app.handle()));
             let app_state = AppState::new(DEFAULT_SERVER_URL, store);
             app.manage(app_state);
+            app.manage(TrayState {
+                quit_requested: std::sync::atomic::AtomicBool::new(false),
+            });
 
             // Wire Tauri's event emitter to AppState so services can emit
             // progress events without depending on Tauri directly.
@@ -89,8 +96,9 @@ pub fn run() {
             let quit = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
             let menu = MenuBuilder::new(app).items(&[&open, &quit]).build()?;
 
-            TrayIconBuilder::new()
+            let tray = TrayIconBuilder::new()
                 .menu(&menu)
+                .tooltip("Castify")
                 .icon(app.default_window_icon().unwrap().clone())
                 .icon_as_template(false)
                 .on_tray_icon_event(|tray, event| {
@@ -110,11 +118,18 @@ pub fn run() {
                         }
                     }
                     "quit" => {
+                        if let Some(state) = app.try_state::<TrayState>() {
+                            state.quit_requested.store(
+                                true,
+                                std::sync::atomic::Ordering::SeqCst,
+                            );
+                        }
                         app.exit(0);
                     }
                     _ => {}
                 })
                 .build(app)?;
+            app.manage(tray);
 
             Ok(())
         })
@@ -147,6 +162,18 @@ pub fn run() {
         .expect("error while building castify")
         .run(|app, event| {
             if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                let quit_requested = app
+                    .try_state::<TrayState>()
+                    .map(|state| {
+                        state
+                            .quit_requested
+                            .load(std::sync::atomic::Ordering::SeqCst)
+                    })
+                    .unwrap_or(false);
+                if quit_requested {
+                    return;
+                }
+
                 api.prevent_exit();
                 // Hide all windows instead of quitting
                 if let Some(window) = app.get_webview_window("main") {

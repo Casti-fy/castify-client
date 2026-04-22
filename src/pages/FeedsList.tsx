@@ -158,13 +158,7 @@ export default function FeedsList({ onSelectFeed, onAccount, syncStatus }: Props
               className="feed-card"
               onClick={() => onSelectFeed(feed.id)}
             >
-              <div className="feed-card-art">
-                {feed.artwork_url ? (
-                  <img src={feed.artwork_url} alt={feed.name} />
-                ) : (
-                  <div className="feed-card-placeholder">{feed.name.charAt(0)}</div>
-                )}
-              </div>
+              <FeedArtwork feed={feed} />
               <div className="feed-card-name">{feed.name}</div>
               <div className="feed-card-sub">{feed.episode_count ?? 0} ep{(feed.episode_count ?? 0) !== 1 ? "s" : ""}</div>
             </div>
@@ -198,6 +192,43 @@ export default function FeedsList({ onSelectFeed, onAccount, syncStatus }: Props
           onCancel={() => setConfirmDelete(null)}
         />
       )}
+    </div>
+  );
+}
+
+function FeedArtwork({ feed }: { feed: Feed }) {
+  const [imageState, setImageState] = useState<"loading" | "loaded" | "failed">(
+    feed.artwork_url ? "loading" : "failed"
+  );
+
+  useEffect(() => {
+    setImageState(feed.artwork_url ? "loading" : "failed");
+  }, [feed.artwork_url]);
+
+  const initial = feed.name.trim().charAt(0).toUpperCase() || "?";
+
+  if (!feed.artwork_url || imageState === "failed") {
+    return (
+      <div className="feed-card-art">
+        <div className="feed-card-placeholder">{initial}</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`feed-card-art${imageState === "loading" ? " is-loading" : ""}`}>
+      {imageState === "loading" && (
+        <div className="feed-card-placeholder">{initial}</div>
+      )}
+      <img
+        src={feed.artwork_url}
+        alt={feed.name}
+        loading="lazy"
+        decoding="async"
+        referrerPolicy="no-referrer"
+        onLoad={() => setImageState("loaded")}
+        onError={() => setImageState("failed")}
+      />
     </div>
   );
 }

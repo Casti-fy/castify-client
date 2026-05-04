@@ -182,6 +182,18 @@ jobs:
           YTDLP="$APP/Contents/MacOS/yt-dlp"
           ENT="src-tauri/entitlements/yt-dlp.plist"
 
+          # Tauri’s first signature may embed entitlements the main app needs. Capture them
+          # before we touch the bundle so the top-level re-sign can restore them (otherwise
+          # codesign can drop or replace them, which can break menu bar / other AppKit edge cases).
+          PRESERVED_ENTS="$(mktemp)"
+          if codesign -d --entitlements "$PRESERVED_ENTS" "$APP" 2>/dev/null && [ -s "$PRESERVED_ENTS" ]; then
+            echo "==> Preserved .app entitlements from Tauri build ($(wc -c < "$PRESERVED_ENTS") bytes)"
+          else
+            rm -f "$PRESERVED_ENTS"
+            PRESERVED_ENTS=""
+            echo "==> No embedded .app entitlements to preserve"
+          fi
+
           # Re-sign yt-dlp with disable-library-validation entitlement
           echo "==> Re-signing yt-dlp with entitlements..."
           codesign --force --options runtime \
@@ -192,9 +204,17 @@ jobs:
 
           # Re-sign the .app (without --deep) to update the code seal
           echo "==> Re-signing Castify.app..."
-          codesign --force --options runtime \
-            --sign "$APPLE_SIGNING_IDENTITY" \
-            "$APP"
+          if [ -n "${PRESERVED_ENTS}" ] && [ -s "$PRESERVED_ENTS" ]; then
+            codesign --force --options runtime \
+              --entitlements "$PRESERVED_ENTS" \
+              --sign "$APPLE_SIGNING_IDENTITY" \
+              "$APP"
+            rm -f "$PRESERVED_ENTS"
+          else
+            codesign --force --options runtime \
+              --sign "$APPLE_SIGNING_IDENTITY" \
+              "$APP"
+          fi
 
           # Re-notarize the .app
           echo "==> Notarizing Castify.app..."

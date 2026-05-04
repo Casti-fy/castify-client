@@ -136,14 +136,16 @@ pub fn run() {
 
             // Use the same embedded image as the window icon (from bundle icon list in
             // tauri.conf). Tauri's TrayIconBuilder::icon drops the image if Image→tray
-            // conversion fails without error; set_icon after build() fixes that. Template mode is
-            // for the monochrome menu-bar asset only; the default bundle PNG is full-color.
+            // conversion fails without error; set_icon after build() fixes that. If there is no
+            // default window icon, fall back to 32x32.png (always in git).
             let (tray_image, template_tray) =
                 if let Some(img) = app.handle().default_window_icon().cloned() {
                     (img, false)
                 } else {
+                    // Fallback must use a tracked icon (see src-tauri/icons/); tray-template.png
+                    // is optional locally but not in git for some dev machines.
                     (
-                        tauri::include_image!("./icons/tray-template.png"),
+                        tauri::include_image!("./icons/32x32.png"),
                         true,
                     )
                 };

@@ -78,14 +78,15 @@ jobs:
             build-essential
 
       # Windows: MSYS2 with mingw-w64 for building ffmpeg from source.
-      # update:false + manual keyring refresh below avoids the stale-keyring
-      # signature failure that hits whenever MSYS2 rotates signing keys.
+      # Use setup-msys2's update:true (two-phase pacman -Syuu + taskkill between passes).
+      # Do not run pacman -Syu in a follow-up step: full upgrades can spawn a GUI
+      # ("Refresh MSYS2 keyring" / close-all-processes) that hangs or fails on GHA.
       - name: Setup MSYS2
         if: matrix.platform == 'windows-2022'
         uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
-          update: false
+          update: true
           install: >-
             git
             curl
@@ -95,13 +96,6 @@ jobs:
             mingw-w64-ucrt-x86_64-nasm
             mingw-w64-ucrt-x86_64-python
             mingw-w64-ucrt-x86_64-python-pip
-
-      - name: Refresh MSYS2 keyring and update
-        if: matrix.platform == 'windows-2022'
-        shell: msys2 {0}
-        run: |
-          pacman -Sy --noconfirm --needed msys2-keyring
-          pacman -Syu --noconfirm
 
       - name: Install Python
         uses: actions/setup-python@v5

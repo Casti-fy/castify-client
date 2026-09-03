@@ -55,7 +55,11 @@ pub async fn update_metadata(
 
 pub async fn fetch_incomplete(state: &AppState) -> Result<Vec<IncompleteEpisode>, AppError> {
     let api = state.api.read().await;
-    api.request::<Vec<IncompleteEpisode>>("/api/v1/episodes?status=pending,failed", "GET", true)
+    api.request::<Vec<IncompleteEpisode>>(
+        "/api/v1/episodes?status=pending,failed&limit=1000",
+        "GET",
+        true,
+    )
         .await
 }
 

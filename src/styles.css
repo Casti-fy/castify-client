@@ -601,6 +601,11 @@ input::placeholder {
   color: var(--warning);
 }
 
+.badge-error {
+  background: rgba(220, 38, 38, 0.1);
+  color: #dc2626;
+}
+
 /* Modal */
 .modal-overlay {
   position: fixed;

@@ -158,9 +158,19 @@ export default function FeedDetail({ feedId, user, onBack }: Props) {
             </div>
             <div className="episode-status">
               <span
-                className={`badge ${ep.status === "ready" ? "badge-ok" : "badge-warn"}`}
+                className={`badge ${
+                  ep.status === "ready"
+                    ? "badge-ok"
+                    : ep.status === "failed"
+                      ? "badge-error"
+                      : "badge-warn"
+                }`}
               >
-                {ep.status === "ready" ? "ready" : "processing"}
+                {ep.status === "ready"
+                  ? "ready"
+                  : ep.status === "failed"
+                    ? "failed"
+                    : "processing"}
               </span>
             </div>
           </li>

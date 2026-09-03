@@ -20,6 +20,16 @@ pub enum Priority {
     Normal, // startup recovery from API
 }
 
+impl Priority {
+    pub fn label(self) -> &'static str {
+        match self {
+            Priority::Urgent => "urgent",
+            Priority::High => "high",
+            Priority::Normal => "normal",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Job {
     pub feed_id: String,
@@ -54,6 +64,12 @@ impl ChannelSenders {
             log::warn!("Failed to send job to channel: {e}");
         }
     }
+
+    pub fn queued_len(&self) -> usize {
+        self.urgent_tx.max_capacity() - self.urgent_tx.capacity()
+            + self.high_tx.max_capacity() - self.high_tx.capacity()
+            + self.normal_tx.max_capacity() - self.normal_tx.capacity()
+    }
 }
 
 /// Receiver-side of the three priority channels. Moved into the worker task.
@@ -65,9 +81,9 @@ pub struct ChannelReceivers {
 
 /// Create a matched pair of senders + receivers for one worker.
 pub fn create_worker_channels() -> (ChannelSenders, ChannelReceivers) {
-    let (urgent_tx, urgent_rx) = mpsc::channel(64);
-    let (high_tx, high_rx) = mpsc::channel(64);
-    let (normal_tx, normal_rx) = mpsc::channel(256);
+    let (urgent_tx, urgent_rx) = mpsc::channel(128);
+    let (high_tx, high_rx) = mpsc::channel(128);
+    let (normal_tx, normal_rx) = mpsc::channel(2048);
     (
         ChannelSenders {
             urgent_tx,
@@ -126,7 +142,16 @@ impl SyncChannels {
 
     /// Send a job to the download channel matching its priority.
     pub async fn send_download(&self, job: Job) {
-        self.download_tx.read().await.send(job).await;
+        let tx = self.download_tx.read().await;
+        log::info!(
+            "[download-queue] enqueue {:?} priority={} feed={} video={} (queued={})",
+            job.episode_title,
+            job.priority.label(),
+            job.feed_name,
+            job.video_id,
+            tx.queued_len(),
+        );
+        tx.send(job).await;
     }
 
     /// Send a job to the upload channel matching its priority.

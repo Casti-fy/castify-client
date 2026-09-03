@@ -7,7 +7,6 @@ use crate::models::UploadURLResponse;
 use crate::services::{episode as episode_service, helpers, uploader};
 use crate::state::{AppState, ChannelReceivers, Job};
 
-const SEEN_CAP: usize = 1000;
 /// B2 can return 503 under load; refetch upload URL before each retry (B2 recommendation).
 const UPLOAD_MAX_ATTEMPTS: u32 = 6;
 
@@ -129,7 +128,8 @@ async fn process_upload(state: &AppState, job: Job) -> Result<(), AppError> {
 pub async fn start_upload_worker(state: AppState, mut channels: ChannelReceivers) {
     let max_concurrent = helpers::cpu_count() / 2;
     let semaphore = Arc::new(tokio::sync::Semaphore::new(max_concurrent));
-    let mut seen: HashSet<String> = HashSet::new();
+    let in_flight: Arc<tokio::sync::Mutex<HashSet<String>>> =
+        Arc::new(tokio::sync::Mutex::new(HashSet::new()));
 
     loop {
         let job = tokio::select! {
@@ -143,18 +143,18 @@ pub async fn start_upload_worker(state: AppState, mut channels: ChannelReceivers
             }
         };
 
-        
-
-        if !seen.insert(job.episode_id.clone()) {
-            continue;
-        }
-        if seen.len() >= SEEN_CAP {
-            seen.clear();
+        {
+            let mut active = in_flight.lock().await;
+            if !active.insert(job.episode_id.clone()) {
+                continue;
+            }
         }
 
         let sem = semaphore.clone();
         let state = state.clone();
         let job_for_task = job.clone();
+        let episode_id = job.episode_id.clone();
+        let in_flight = in_flight.clone();
 
         let permit = sem.acquire_owned().await.unwrap();
         tokio::spawn(async move {
@@ -165,6 +165,7 @@ pub async fn start_upload_worker(state: AppState, mut channels: ChannelReceivers
                     job_for_task.episode_id
                 );
             }
+            in_flight.lock().await.remove(&episode_id);
         });
     }
 }

@@ -121,7 +121,42 @@ pub async fn start_periodic_sync(state: &AppState) -> Result<(), AppError> {
     let state_clone = state.clone();
     let mut handles = state.sync_handles.lock().await;
 
+    if handles.download.is_some() {
+        log::info!("Periodic sync already running");
+        return Ok(());
+    }
+
     log::info!("Starting periodic sync");
+
+    // Start download/upload workers BEFORE anything enqueues jobs. Receivers are
+    // taken once here; if missing (e.g. after stop), recreate channels first.
+    if state.sync_channels.download_rx.lock().await.is_none()
+        || state.sync_channels.upload_rx.lock().await.is_none()
+    {
+        log::info!("Recreating sync channels");
+        state.sync_channels.reset().await;
+    }
+
+    let dl_rx = state.sync_channels.download_rx.lock().await.take();
+    let ul_rx = state.sync_channels.upload_rx.lock().await.take();
+
+    if let Some(rx) = dl_rx {
+        let state_dl = state_clone.clone();
+        handles.download = Some(tokio::spawn(async move {
+            sync_download::start_download_worker(state_dl, rx).await;
+        }));
+    } else {
+        log::warn!("Download receivers unavailable, workers not started");
+    }
+
+    if let Some(rx) = ul_rx {
+        let state_ul = state_clone.clone();
+        handles.upload = Some(tokio::spawn(async move {
+            sync_upload::start_upload_worker(state_ul, rx).await;
+        }));
+    } else {
+        log::warn!("Upload receivers unavailable, workers not started");
+    }
 
     let state_scan = state_clone.clone();
     handles.scan = Some(tokio::spawn(async move {
@@ -152,34 +187,6 @@ pub async fn start_periodic_sync(state: &AppState) -> Result<(), AppError> {
         }
     }));
 
-    // Ensure we have fresh channel receivers in case sync was previously started/stopped.
-    if state.sync_channels.download_rx.lock().await.is_none()
-        || state.sync_channels.upload_rx.lock().await.is_none()
-    {
-        state.sync_channels.reset().await;
-    }
-
-    let dl_rx = state.sync_channels.download_rx.lock().await.take();
-    let ul_rx = state.sync_channels.upload_rx.lock().await.take();
-
-    if let Some(rx) = dl_rx {
-        let state_dl = state_clone.clone();
-        handles.download = Some(tokio::spawn(async move {
-            sync_download::start_download_worker(state_dl, rx).await;
-        }));
-    } else {
-        log::warn!("Download receivers unavailable, workers not started");
-    }
-
-    if let Some(rx) = ul_rx {
-        let state_ul = state_clone.clone();
-        handles.upload = Some(tokio::spawn(async move {
-            sync_upload::start_upload_worker(state_ul, rx).await;
-        }));
-    } else {
-        log::warn!("Upload receivers unavailable, workers not started");
-    }
-
     Ok(())
 }
 
@@ -190,12 +197,15 @@ pub async fn auto_start_sync(state: &AppState) {
         return;
     }
 
-    requeue_incomplete(state, Priority::Normal).await;
-
     if let Err(e) = start_periodic_sync(state).await {
         log::warn!("Auto-start sync failed: {e}");
         return;
     }
+
+    let state_requeue = state.clone();
+    tokio::spawn(async move {
+        requeue_incomplete(&state_requeue, Priority::Normal).await;
+    });
 }
 
 /// Fetch all incomplete episodes in one request and push them to the download channel.

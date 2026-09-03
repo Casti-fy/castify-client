@@ -9,12 +9,12 @@ use crate::models::UpdateEpisodeMetadataRequest;
 use crate::services::{episode as episode_service, extractor, helpers};
 use crate::state::{AppState, ChannelReceivers, Job, Priority};
 
-const SEEN_CAP: usize = 1000;
-
 pub async fn start_download_worker(state: AppState, mut channels: ChannelReceivers) {
     let max_concurrent = helpers::cpu_count().clamp(2, 4);
+    log::info!("[download-queue] worker started (max_concurrent={max_concurrent})");
     let semaphore = Arc::new(tokio::sync::Semaphore::new(max_concurrent));
-    let mut seen: HashSet<String> = HashSet::new();
+    let in_flight: Arc<tokio::sync::Mutex<HashSet<String>>> =
+        Arc::new(tokio::sync::Mutex::new(HashSet::new()));
 
     loop {
         let job = tokio::select! {
@@ -28,33 +28,60 @@ pub async fn start_download_worker(state: AppState, mut channels: ChannelReceive
             }
         };
 
-        
+        let in_flight_key = format!("{}:{}", job.feed_id, job.video_id);
+        {
+            let mut active = in_flight.lock().await;
+            if !active.insert(in_flight_key.clone()) {
+                log::info!(
+                    "[download-queue] skip duplicate in-flight {:?} ({})",
+                    job.episode_title,
+                    job.video_id,
+                );
+                continue;
+            }
+        }
 
-        let seen_key = format!("{}:{}", job.feed_id, job.video_id);
-        if !seen.insert(seen_key) {
-            continue;
-        }
-        if seen.len() >= SEEN_CAP {
-            seen.clear();
-        }
+        log::info!(
+            "[download-queue] dequeue {:?} priority={} feed={} video={}",
+            job.episode_title,
+            job.priority.label(),
+            job.feed_name,
+            job.video_id,
+        );
 
         let sem = semaphore.clone();
         let state = state.clone();
         let job_priority = job.priority;
         let job_for_task = job.clone();
+        let in_flight = in_flight.clone();
+        let episode_id = job.episode_id.clone();
+        let episode_title = job.episode_title.clone();
 
         let permit = sem.acquire_owned().await.unwrap();
+        log::info!(
+            "[download-queue] start {:?} priority={} (in_flight={})",
+            episode_title,
+            job_priority.label(),
+            in_flight.lock().await.len(),
+        );
         tokio::spawn(async move {
             let _permit = permit;
 
             if job_priority != Priority::Urgent {
                 let delay = rand::thread_rng().gen_range(15..=30);
+                log::info!(
+                    "[download-queue] waiting {delay}s before download (priority={})",
+                    job_priority.label(),
+                );
                 tokio::time::sleep(Duration::from_secs(delay)).await;
             }
 
             if let Err(e) = process_download(&state, job_for_task).await {
-                log::warn!("Download job failed (episode {}): {e}", job.episode_id);
+                log::warn!("Download job failed (episode {}): {e}", episode_id);
             }
+
+            in_flight.lock().await.remove(&in_flight_key);
+            log::info!("[download-queue] done {:?} (in_flight={})", episode_title, in_flight.lock().await.len());
         });
     }
 }
@@ -107,6 +134,12 @@ async fn process_download(state: &AppState, job: Job) -> Result<(), AppError> {
         &job.feed_name,
         "download",
         &format!("Downloading: {}", job.episode_title),
+    );
+    log::info!(
+        "[download-queue] downloading {:?} video={} url={}",
+        job.episode_title,
+        job.video_id,
+        ep_url,
     );
     let _ = episode_service::update_status(state, episode_id, "pending", None).await;
 

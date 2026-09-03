@@ -29,7 +29,7 @@ BINARIES_DIR="$PROJECT_DIR/src-tauri/binaries"
 
 # Versions
 # Pin to a recent release; YouTube breaks older builds (nsig / format errors).
-YTDLP_VERSION="2026.03.17"
+YTDLP_VERSION="2026.08.19"
 FFMPEG_VERSION="7.1"
 deno_VERSION="2.2.5"
 MACOS_MIN="12.0"
